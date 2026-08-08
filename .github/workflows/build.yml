@@ -1,0 +1,97 @@
+name: Build NavEx
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Navisworks ${{ matrix.year }}
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - year: "2024"
+            package: "2024.0.0"
+          - year: "2025"
+            package: "2025.0.0"
+          - year: "2026"
+            package: "2026.0.1"
+          - year: "2027"
+            package: "2027.0.0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # WPF on .NET Framework needs full MSBuild — `dotnet build` cannot compile
+      # XAML for net48, so the SDK-style project is driven by MSBuild here.
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore
+        run: >
+          msbuild NavEx\NavEx.CI.csproj
+          -t:restore
+          -p:Configuration=Release
+          -p:Platform=x64
+          -p:NWYear=${{ matrix.year }}
+          -p:NWPackageVersion=${{ matrix.package }}
+
+      - name: Build
+        run: >
+          msbuild NavEx\NavEx.CI.csproj
+          -t:build
+          -p:Configuration=Release
+          -p:Platform=x64
+          -p:NWYear=${{ matrix.year }}
+          -p:NWPackageVersion=${{ matrix.package }}
+          -warnaserror:CS0618
+          -v:minimal
+
+      - name: Stage plugin files
+        shell: pwsh
+        run: |
+          $out = "staging/V$($env:YEAR.Substring(2))"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "NavEx/bin/x64/Release/net48/NavEx.dll" $out
+          Copy-Item "NavEx/NavEx.addin" $out
+        env:
+          YEAR: ${{ matrix.year }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NavEx-NW${{ matrix.year }}
+          path: staging/
+
+  package:
+    name: Package plugin zip
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble NavEx-Plugin
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path NavEx-Plugin | Out-Null
+          Get-ChildItem artifacts -Directory | ForEach-Object {
+            Copy-Item "$($_.FullName)/*" NavEx-Plugin -Recurse -Force
+          }
+          Copy-Item installer/Install.cmd   NavEx-Plugin
+          Copy-Item installer/Uninstall.cmd NavEx-Plugin
+          Copy-Item installer/README.txt    NavEx-Plugin
+          Compress-Archive -Path NavEx-Plugin/* -DestinationPath NavEx-Plugin.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NavEx-Plugin
+          path: NavEx-Plugin.zip

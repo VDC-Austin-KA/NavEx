@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Navisworks add-in manifest.
+
+  Deployed alongside NavEx.dll into:
+      C:\Program Files\Autodesk\Navisworks Manage <year>\Plugins\NavEx\
+
+  The plugin appears on the Add-Ins ribbon tab as "NavEx".
+-->
+<PluginsFile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Plugins>
+    <Plugin Name="NavEx" Assembly="NavEx.dll" DeveloperId="ACLP_VDC" DisplayName="NavEx">
+      <Description>Export search sets and selections as GLB / glTF / OBJ</Description>
+    </Plugin>
+  </Plugins>
+</PluginsFile>

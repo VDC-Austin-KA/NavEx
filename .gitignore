@@ -1,0 +1,26 @@
+# Build output
+NavEx/bin/
+NavEx/obj/
+staging/
+NavEx-Plugin/
+
+# Archives
+*.zip
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+*.FileListAbsolute.txt
+
+# Rider / JetBrains
+.idea/
+
+# Claude Code project settings
+.claude/
+
+# OS
+Thumbs.db
+desktop.ini
+nul

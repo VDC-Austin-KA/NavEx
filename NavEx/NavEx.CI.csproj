@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CI project file.
+
+  Same sources as NavEx.csproj, but the Navisworks references come from the
+  Speckle.Navisworks.API NuGet package instead of a local install, so GitHub
+  Actions (or any machine without the Navisworks SDK) can produce a per-year DLL.
+
+  Build one year at a time:
+
+    dotnet build NavEx/NavEx.CI.csproj -c Release -p:Platform=x64 \
+      -p:NWYear=2027 -p:NWPackageVersion=2027.0.0
+
+  Supported NWYear / NWPackageVersion pairs:
+    2024 -> 2024.0.0
+    2025 -> 2025.0.0
+    2026 -> 2026.0.1
+    2027 -> 2027.0.0
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>NavEx</AssemblyName>
+    <RootNamespace>NavEx</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>7.3</LangVersion>
+    <!-- Properties/AssemblyInfo.cs already declares the assembly attributes. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <NWYear Condition="'$(NWYear)' == ''">2027</NWYear>
+    <NWPackageVersion Condition="'$(NWPackageVersion)' == ''">2027.0.0</NWPackageVersion>
+    <DefineConstants>$(DefineConstants);NW$(NWYear)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="bin/**;obj/**" />
+    <Page Remove="bin/**;obj/**" />
+    <None Remove="bin/**;obj/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="NavEx.addin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- ExcludeAssets="runtime" keeps the Navisworks assemblies out of the output:
+         they must be loaded from the host application, never shipped beside it. -->
+    <PackageReference Include="Speckle.Navisworks.API" Version="$(NWPackageVersion)" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>
