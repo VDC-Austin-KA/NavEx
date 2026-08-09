@@ -10,6 +10,11 @@
       python3 tools/typecheck/gen_xaml_stub.py
       dotnet build tools/typecheck/typecheck.csproj
 
+    Pass NWPackageVersion to check a specific Navisworks year, which is how CI
+    proves every supported year still compiles:
+
+      dotnet build tools/typecheck/typecheck.csproj -p:NWPackageVersion=2025.0.0
+
     It does not produce a usable DLL (the real build compiles the XAML); it
     exists to catch compile errors without a Windows machine.
   -->

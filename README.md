@@ -175,6 +175,36 @@ transform or winding regression; well-formed JSON on its own proves nothing.
 The type check also catches a Windows-only class of bug: a control referenced in
 `MainWindow.xaml.cs` whose `x:Name` no longer exists in the XAML.
 
+Pass `-p:NWPackageVersion=` to check one year:
+
+```bash
+dotnet build tools/typecheck/typecheck.csproj -p:NWPackageVersion=2025.0.0
+```
+
+CI runs that across all four supported years, so a member that disappears or
+changes signature in any single release fails that year's leg and leaves the
+others green.
+
+### Why one build works across 2024-2027
+
+NavEx compiles unchanged against every supported year, with no `#if NW20xx`
+branches, because it stays on the part of the API that has not moved. Comparing
+the 2024, 2025, 2026 and 2027 reference assemblies:
+
+* The COM geometry path NavEx depends on — `ComApiBridge`, `InwOpSelection`,
+  `InwOaPath`, `InwOaFragment3`, `InwLTransform3f3`, `InwSimpleVertex`,
+  `InwSimplePrimitivesCB`, `InwOaMaterial` — is **identical** in all four, down
+  to the `nwEVertexProperty` flag values (`eNORMAL=1`, `eCOLOR=2`,
+  `eTEX_COORD=4`).
+* The managed API did change across those releases, but only in members NavEx
+  never calls: `Document.PublishFile` gained an `NwdExportOptions` parameter and
+  `ExportToNwd` appeared, `CreateCommentWithUniqueId` took an `Assignee` instead
+  of a string, `SavedItem` gained `CanTransform` / `Transform`, and
+  `GroupItem.RemoveAllChildrenAndTakeOwn` was dropped after 2025.
+
+The per-year DLLs exist because each links against that year's assemblies, not
+because the source differs.
+
 ### How geometry actually comes out of Navisworks
 
 The managed API exposes geometry only as bounding boxes and primitive counts —

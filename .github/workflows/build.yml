@@ -7,13 +7,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Type-checks every source file (code-behind included) and exercises the
-  # format writers end to end. Runs on Linux because it needs neither Windows
-  # nor Navisworks, so it still reports even when Windows runners are
-  # unavailable — which is when a compile check matters most.
-  checks:
-    name: Type check and writer tests
+  # Type-checks every source file (code-behind included) against each supported
+  # Navisworks year. This is what actually enforces the claim on the tin: if a
+  # member NavEx calls is missing or changed its signature in any one year, that
+  # year's leg fails while the others stay green.
+  #
+  # Runs on Linux because it needs neither Windows nor Navisworks, so it still
+  # reports when Windows runners are unavailable — which is exactly when a
+  # compile check matters most.
+  typecheck:
+    name: Type check ${{ matrix.year }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - year: "2024"
+            package: "2024.0.0"
+          - year: "2025"
+            package: "2025.0.0"
+          - year: "2026"
+            package: "2026.0.1"
+          - year: "2027"
+            package: "2027.0.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +42,24 @@ jobs:
       - name: Generate the XAML codegen stand-in
         run: python3 tools/typecheck/gen_xaml_stub.py
 
-      - name: Type check all sources against the Navisworks 2027 API
-        run: dotnet build tools/typecheck/typecheck.csproj -warnaserror -v minimal
+      - name: Type check against the Navisworks ${{ matrix.year }} API
+        run: >
+          dotnet build tools/typecheck/typecheck.csproj
+          -p:NWPackageVersion=${{ matrix.package }}
+          -warnaserror -v minimal
+
+  # The format writers never touch Navisworks, so they are version-independent
+  # and only need checking once.
+  writer-tests:
+    name: Writer tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
       - name: Build and run the writer tests
         run: |
