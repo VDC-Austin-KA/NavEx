@@ -100,6 +100,119 @@ it instead:
 {"guid":"…","name":"Basic Wall:Generic - 200mm","set":"ARCH","properties":{…}}
 ```
 
+## 4D sequencing (Nav4DEx)
+
+The **4D** tab turns a model and a schedule into a linked 4D sequence, and gives
+every model, set and export file a name that sorts into build order.
+
+### The naming scheme
+
+```
+SSSSS_LEVEL_DISC_ACTV_description
+02868_L05_ARCS_FRMG_Interior-framing
+│     │     │    └── activity: what work this is
+│     │     └────── discipline: STRC, ARCS, MECH, PLBG, ELEC, FIRE…
+│     └──────────── level: L01…L99, L-01 for below grade, SITE, ROOF
+└────────────────── sequence: when it happens
+```
+
+Those five leading digits are the whole trick. They are
+`(level + trade lag + bias)` for the first three and the activity's position in
+the floor cycle for the last two — so sorting the strings ASCII-ascending sorts
+the work into the order it gets built.
+
+**Why a lag.** On a high-rise the structure races ahead and every following trade
+trails it by a roughly constant number of floors. So the moment a piece of work
+happens is not its floor, it is the floor *the structure has reached* by then:
+
+```
+time index = level + trade lag
+```
+
+Structure on L08, framing on L05 (lag 3) and curtain wall on L03 (lag 5) all
+land on time index 8 — which is exactly the stagger you see on site. Fifteen
+storeys of structure, MEP, framing, curtain wall and drywall sort like this:
+
+```
+02140_L01_STRC_DECK      structure alone for the first three floors
+02240_L02_STRC_DECK
+02340_L03_STRC_DECK
+02440_L04_STRC_DECK
+02460_L01_MECH_MEPH      MEP and framing join, 3 floors behind
+02468_L01_ARCS_FRMG
+02540_L05_STRC_DECK
+02560_L02_MECH_MEPH
+02568_L02_ARCS_FRMG
+02640_L06_STRC_DECK
+02660_L03_MECH_MEPH
+02668_L03_ARCS_FRMG
+02672_L01_ARCS_CWAL      curtain wall joins, 5 floors behind
+…
+02840_L08_STRC_DECK      by the time structure tops L08…
+02860_L05_MECH_MEPH      …MEP and framing are on L05…
+02868_L05_ARCS_FRMG
+02872_L03_ARCS_CWAL      …and the skin is on L03
+02880_L02_ARCS_DRYW
+```
+
+Cycle order rises with lag, so two activities sharing a time index list top-down
+the way you would see them standing on site — structure above the framing below
+it above the skin below that. The **Sequence** sub-tab makes every lag and order
+editable, because they vary by project; the defaults are a starting point, not a
+rule.
+
+### Naming your models and sets
+
+The **Naming** sub-tab classifies loaded models and search sets by discipline,
+level and work scope, using the token-dictionary approach from AutoNAV widened to
+cover all three. `L01_ARCS`, `Level 1 - Architectural`, and
+`ARCH-L01-Framing.nwc` all resolve identically, and longest-alias-wins means
+"Curtain Wall" is glazing rather than a generic wall.
+
+Batch renaming is preview-first: you get a proposal per set with the reason it
+was classified that way, and nothing is renamed until you press Apply. Sets the
+classifier could not fully resolve are shown but left unticked — a guessed
+sequence number sorts the folder wrong, which is worse than no number at all.
+
+### Importing a schedule
+
+Reads P6 XER, P6 XML, MS Project XML and any delimited text. Column detection
+runs on header aliases first, then on value shape for anything left over, which
+is what rescues P6's internal names (`target_start_date`) and headerless exports.
+
+Only **Task Name**, **Planned Start** and **Planned Finish** are required.
+Description, Task ID, Actual Start/Finish, Duration and Task Type are all used
+when present and skipped when not. Anything unresolved goes to a mapping dialog
+showing real sample values from your file — never guessed silently, because a
+wrongly guessed date column corrupts the whole sequence invisibly.
+
+### Matching tasks to geometry
+
+Every task and every set reduces to the same level/discipline/activity identity,
+and agreement there counts for far more than word overlap — "Level 5 structural
+deck" and `02840_L05_STRC_DECK` share almost no literal text but describe the
+same work. Word overlap breaks ties.
+
+A level conflict is a veto, not a penalty: "Level 12 drywall" will never attach
+to the level 2 set, because an unmatched task is visible in the review grid and a
+wrongly matched one is not. Near-ties are flagged as ambiguous for the same
+reason. Procurement and administrative activities with no geometry stay
+unmatched, which is the correct answer.
+
+Manual corrections are remembered per document and keyed on the task ID, so
+re-importing an updated schedule refreshes dates and keeps every human decision.
+
+### Sending it to TimeLiner
+
+The TimeLiner managed API lives in `Autodesk.Navisworks.Timeliner.dll`, which
+ships inside Navisworks but is not redistributable and is not on NuGet.
+Referencing it directly would mean NavEx could only be compiled on a machine with
+Navisworks installed, and would pin one build to one release. So the bridge binds
+late, looks up every member defensively, and reports rather than throws. Tasks
+matching an existing TimeLiner task by name are updated in place instead of
+duplicated. If the bridge cannot bind at all, NavEx writes a CSV that TimeLiner's
+own data-source import reads.
+
 ## Format notes
 
 | Format | Carries |

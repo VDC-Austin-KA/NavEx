@@ -133,6 +133,19 @@
     <Compile Include="Core\Exporters\Json.cs" />
     <Compile Include="Core\Exporters\GltfWriter.cs" />
     <Compile Include="Core\Exporters\ObjWriter.cs" />
+    <Compile Include="Core\FourD\SequenceModel.cs" />
+    <Compile Include="Core\FourD\FourDName.cs" />
+    <Compile Include="Core\FourD\ScheduleTask.cs" />
+    <Compile Include="Core\FourD\ScheduleImporter.cs" />
+    <Compile Include="Core\FourD\TaskMatcher.cs" />
+    <Compile Include="Core\FourD\TimelinerBridge.cs" />
+    <Compile Include="Core\FourD\SetRenamer.cs" />
+    <Compile Include="Core\FourD\FourDStore.cs" />
+    <Compile Include="Controls\GanttView.cs" />
+    <Compile Include="ColumnMappingWindow.cs" />
+    <Compile Include="MainWindow.FourD.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 
   <ItemGroup>

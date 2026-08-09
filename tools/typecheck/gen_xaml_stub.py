@@ -38,6 +38,8 @@ WPF_TYPES = {
     "Slider": "System.Windows.Controls.Slider",
     "Label": "System.Windows.Controls.Label",
     "Expander": "System.Windows.Controls.Expander",
+    # Project-local controls.
+    "GanttView": "NavEx.Controls.GanttView",
 }
 
 HERE = os.path.dirname(os.path.abspath(__file__))
