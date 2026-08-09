@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Exercises the format writers on any platform.
+
+    GltfWriter, ObjWriter and MeshBuilder never call into Navisworks, so with a
+    handful of stand-in types (Shim.cs) they compile and run on .NET 8 — which
+    means the file-format layer can be tested on Linux CI without Navisworks,
+    without Windows, and without a model.
+
+      dotnet run  (project tools/writer-tests/WriterTests.csproj)
+      python3 tools/writer-tests/validate_gltf.py [output-dir]
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>NavEx</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Shim.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="../../NavEx/Core/Vec.cs" />
+    <Compile Include="../../NavEx/Core/ExportOptions.cs" />
+    <Compile Include="../../NavEx/Core/MaterialDef.cs" />
+    <Compile Include="../../NavEx/Core/MeshBuilder.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/Json.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/GltfWriter.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/ObjWriter.cs" />
+  </ItemGroup>
+</Project>

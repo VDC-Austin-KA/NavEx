@@ -7,6 +7,46 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Type-checks every source file (code-behind included) and exercises the
+  # format writers end to end. Runs on Linux because it needs neither Windows
+  # nor Navisworks, so it still reports even when Windows runners are
+  # unavailable — which is when a compile check matters most.
+  checks:
+    name: Type check and writer tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Generate the XAML codegen stand-in
+        run: python3 tools/typecheck/gen_xaml_stub.py
+
+      - name: Type check all sources against the Navisworks 2027 API
+        run: dotnet build tools/typecheck/typecheck.csproj -warnaserror -v minimal
+
+      - name: Build and run the writer tests
+        run: |
+          mkdir -p artifacts
+          dotnet build tools/writer-tests/WriterTests.csproj -v minimal -o artifacts/bin
+          cd artifacts && dotnet exec bin/WriterTests.dll
+
+      - name: Validate the exported files
+        run: python3 tools/writer-tests/validate_gltf.py artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sample-output
+          path: |
+            artifacts/out.glb
+            artifacts/out.gltf
+            artifacts/out.bin
+            artifacts/out.obj
+            artifacts/out.mtl
+
   build:
     name: Navisworks ${{ matrix.year }}
     runs-on: windows-latest

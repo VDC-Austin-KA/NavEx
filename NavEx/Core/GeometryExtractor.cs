@@ -321,7 +321,12 @@ namespace NavEx.Core
         private List<ModelItem> CollectGeometryItems(ModelItemCollection selection)
         {
             var result = new List<ModelItem>();
-            var seen = new HashSet<int>();
+            // Keyed on the item itself, not on InstanceHashCode: that hash is shared
+            // by every placement of an instanced node, so using it would export one
+            // bolt out of five hundred. ModelItem equality is per-path, which is
+            // exactly the duplicate we do want to collapse — a selection holding
+            // both a parent and its child yields the child twice.
+            var seen = new HashSet<ModelItem>();
 
             foreach (ModelItem item in selection.DescendantsAndSelf)
             {
@@ -337,7 +342,7 @@ namespace NavEx.Core
                     catch (Exception) { }
                 }
 
-                if (seen.Add(item.InstanceHashCode))
+                if (seen.Add(item))
                     result.Add(item);
             }
 

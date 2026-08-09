@@ -24,3 +24,10 @@ NavEx-Plugin/
 Thumbs.db
 desktop.ini
 nul
+
+# Verification tooling output
+tools/typecheck/obj/
+tools/typecheck/bin/
+tools/writer-tests/obj/
+tools/writer-tests/bin/
+artifacts/

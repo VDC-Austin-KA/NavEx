@@ -61,7 +61,10 @@ namespace NavEx.Core
         private readonly ExportOptions _options;
         private readonly Dictionary<string, int> _byKey = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly List<MaterialDef> _materials = new List<MaterialDef>();
-        private readonly Dictionary<int, int> _byItemHash = new Dictionary<int, int>();
+        // Keyed on the item rather than InstanceHashCode: two placements of the
+        // same node can carry different colour overrides, and sharing a cache entry
+        // between them would give one of them the other's appearance.
+        private readonly Dictionary<ModelItem, int> _byItem = new Dictionary<ModelItem, int>();
 
         public MaterialResolver(ExportOptions options)
         {
@@ -100,9 +103,8 @@ namespace NavEx.Core
 
             if (item != null)
             {
-                int hash = item.InstanceHashCode;
                 int cached;
-                if (_byItemHash.TryGetValue(hash, out cached))
+                if (_byItem.TryGetValue(item, out cached))
                     return cached;
 
                 MaterialDef def = null;
@@ -112,7 +114,7 @@ namespace NavEx.Core
                     def = FromModelItem(item);
 
                 int index = def == null ? DefaultMaterialIndex : Intern(def);
-                _byItemHash[hash] = index;
+                _byItem[item] = index;
                 return index;
             }
 

@@ -148,6 +148,33 @@ Use MSBuild rather than `dotnet build`: WPF XAML for `net48` is only compiled by
 full MSBuild. `.github/workflows/build.yml` builds all four years and assembles
 the plugin zip.
 
+### Verifying without Windows
+
+Two harnesses under `tools/` check the code on any platform, which is what CI
+runs on Linux:
+
+```bash
+# Type-check every source file, code-behind included, against the real
+# Navisworks API. gen_xaml_stub.py stands in for the WPF XAML compiler.
+python3 tools/typecheck/gen_xaml_stub.py
+dotnet build tools/typecheck/typecheck.csproj
+
+# Build a known cube through GltfWriter / ObjWriter and validate the output.
+mkdir -p artifacts
+dotnet build tools/writer-tests/WriterTests.csproj -o artifacts/bin
+(cd artifacts && dotnet exec bin/WriterTests.dll)
+python3 tools/writer-tests/validate_gltf.py artifacts
+```
+
+The validator parses the GLB container by hand — header length, chunk padding,
+bufferView and accessor alignment, declared POSITION min/max against the actual
+data — then reconstructs the cube from the buffers and asserts it is closed,
+unit-volume and wound counter-clockwise. That last part is what catches a
+transform or winding regression; well-formed JSON on its own proves nothing.
+
+The type check also catches a Windows-only class of bug: a control referenced in
+`MainWindow.xaml.cs` whose `x:Name` no longer exists in the XAML.
+
 ### How geometry actually comes out of Navisworks
 
 The managed API exposes geometry only as bounding boxes and primitive counts —

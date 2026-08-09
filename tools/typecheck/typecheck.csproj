@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Compiles every NavEx source file on any platform.
+
+    The Navisworks references come from the Speckle.Navisworks.API package, and
+    MainWindow.g.cs — normally produced by the WPF XAML compiler, which only runs
+    on Windows — is generated from MainWindow.xaml by gen_xaml_stub.py. That
+    makes this a full type check of the plugin, code-behind included, on Linux:
+
+      python3 tools/typecheck/gen_xaml_stub.py
+      dotnet build tools/typecheck/typecheck.csproj
+
+    It does not produce a usable DLL (the real build compiles the XAML); it
+    exists to catch compile errors without a Windows machine.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>NavEx</RootNamespace>
+    <AssemblyName>NavEx.Typecheck</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NWPackageVersion Condition="'$(NWPackageVersion)' == ''">2027.0.0</NWPackageVersion>
+    <!-- CS0649: the generated stub's control fields are never assigned. -->
+    <NoWarn>$(NoWarn);CS0649;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="obj/MainWindow.g.cs" />
+    <Compile Include="../../NavEx/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="Speckle.Navisworks.API" Version="$(NWPackageVersion)" PrivateAssets="all" ExcludeAssets="runtime" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+</Project>
