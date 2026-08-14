@@ -16,7 +16,9 @@ namespace NavEx.Core
         /// <summary>.gltf JSON with the buffer inlined as a base64 data URI.</summary>
         GltfEmbedded,
         /// <summary>Wavefront .obj plus .mtl.</summary>
-        Obj
+        Obj,
+        /// <summary>FBX ASCII 7.x, hand-written — geometry only.</summary>
+        Fbx
     }
 
     /// <summary>How extracted triangles get grouped into glTF nodes.</summary>
@@ -154,6 +156,7 @@ namespace NavEx.Core
             {
                 case ExportFormat.Glb: return ".glb";
                 case ExportFormat.Obj: return ".obj";
+                case ExportFormat.Fbx: return ".fbx";
                 default: return ".gltf";
             }
         }

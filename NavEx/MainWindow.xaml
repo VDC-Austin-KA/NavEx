@@ -186,6 +186,7 @@
                                         <ComboBoxItem Content="glTF + .bin — JSON plus buffer" Tag="GltfSeparate"/>
                                         <ComboBoxItem Content="glTF embedded — JSON only, base64 buffer" Tag="GltfEmbedded"/>
                                         <ComboBoxItem Content="OBJ + MTL — legacy interchange" Tag="Obj"/>
+                                        <ComboBoxItem Content="FBX ASCII — geometry only" Tag="Fbx"/>
                                     </ComboBox>
 
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="Batch behaviour"/>

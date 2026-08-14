@@ -133,6 +133,7 @@
     <Compile Include="Core\Exporters\Json.cs" />
     <Compile Include="Core\Exporters\GltfWriter.cs" />
     <Compile Include="Core\Exporters\ObjWriter.cs" />
+    <Compile Include="Core\Exporters\FbxWriter.cs" />
     <Compile Include="Core\FourD\SequenceModel.cs" />
     <Compile Include="Core\FourD\FourDName.cs" />
     <Compile Include="Core\FourD\ScheduleTask.cs" />

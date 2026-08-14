@@ -87,6 +87,7 @@ namespace NavEx
 
             int failures = vertexCount == 24 ? 0 : 1;
             failures += FourDTests.Run();
+            failures += WriterFormatTests.Run();
             return failures == 0 ? 0 : 1;
         }
 

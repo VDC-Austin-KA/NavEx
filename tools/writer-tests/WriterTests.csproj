@@ -23,6 +23,7 @@
     <Compile Include="Shim.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="FourDTests.cs" />
+    <Compile Include="WriterFormatTests.cs" />
     <Compile Include="../../NavEx/Core/FourD/SequenceModel.cs" />
     <Compile Include="../../NavEx/Core/FourD/FourDName.cs" />
     <Compile Include="../../NavEx/Core/FourD/ScheduleTask.cs" />
@@ -36,5 +37,6 @@
     <Compile Include="../../NavEx/Core/Exporters/Json.cs" />
     <Compile Include="../../NavEx/Core/Exporters/GltfWriter.cs" />
     <Compile Include="../../NavEx/Core/Exporters/ObjWriter.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/FbxWriter.cs" />
   </ItemGroup>
 </Project>
