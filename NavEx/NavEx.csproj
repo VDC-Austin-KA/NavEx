@@ -138,6 +138,7 @@
     <Compile Include="Core\FourD\ScheduleTask.cs" />
     <Compile Include="Core\FourD\ScheduleImporter.cs" />
     <Compile Include="Core\FourD\TaskMatcher.cs" />
+    <Compile Include="Core\FourD\ScaleToTasks.cs" />
     <Compile Include="Core\FourD\TimelinerBridge.cs" />
     <Compile Include="Core\FourD\SetRenamer.cs" />
     <Compile Include="Core\FourD\FourDStore.cs" />

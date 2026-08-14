@@ -28,6 +28,7 @@
     <Compile Include="../../NavEx/Core/FourD/ScheduleTask.cs" />
     <Compile Include="../../NavEx/Core/FourD/ScheduleImporter.cs" />
     <Compile Include="../../NavEx/Core/FourD/TaskMatcher.cs" />
+    <Compile Include="../../NavEx/Core/FourD/ScaleToTasks.cs" />
     <Compile Include="../../NavEx/Core/Vec.cs" />
     <Compile Include="../../NavEx/Core/ExportOptions.cs" />
     <Compile Include="../../NavEx/Core/MaterialDef.cs" />
