@@ -84,7 +84,11 @@ namespace NavEx
             int vertexCount = 0;
             foreach (MeshBuilder b in bucket.Builders) vertexCount += b.VertexCount;
             Console.WriteLine("welded vertex count: " + vertexCount + " (expected 24)");
-            return vertexCount == 24 ? 0 : 1;
+
+            int failures = vertexCount == 24 ? 0 : 1;
+            failures += FourDTests.Run();
+            failures += WriterFormatTests.Run();
+            return failures == 0 ? 0 : 1;
         }
 
         private static Vec3 Corner(int index)

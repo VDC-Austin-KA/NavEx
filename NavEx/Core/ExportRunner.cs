@@ -165,9 +165,22 @@ namespace NavEx.Core
                 progress.Update("Writing " + Path.GetFileName(path) + "…", -1);
                 progress.Tick();
 
-                ExportResult written = _options.Format == ExportFormat.Obj
-                    ? new ObjWriter(_options).Write(scene, path)
-                    : new GltfWriter(_options).Write(scene, path);
+                ExportResult written;
+                switch (_options.Format)
+                {
+                    case ExportFormat.Obj:
+                        written = new ObjWriter(_options).Write(scene, path);
+                        break;
+                    case ExportFormat.Fbx:
+                        written = new FbxWriter(_options).Write(scene, path);
+                        break;
+                    case ExportFormat.Datasmith:
+                        written = new DatasmithWriter(_options).Write(scene, path);
+                        break;
+                    default:
+                        written = new GltfWriter(_options).Write(scene, path);
+                        break;
+                }
 
                 written.SetName = sceneName;
 

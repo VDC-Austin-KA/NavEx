@@ -61,6 +61,9 @@ namespace NavEx
             RefreshPresets();
             RefreshTree();
 
+            InitializeFourD();
+            Gantt.TaskClicked += OnGanttTaskClicked;
+
             _initialized = true;
             Log.Info("NavEx " + PluginInfo.Version + " ready.");
         }
@@ -81,6 +84,7 @@ namespace NavEx
             {
                 ReadOptionsFromUi();
                 SettingsStore.Save(_options);
+                SaveFourDState();
             }
 
             Log.Sink = null;

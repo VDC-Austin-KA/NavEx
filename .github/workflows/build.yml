@@ -48,10 +48,11 @@ jobs:
           -p:NWPackageVersion=${{ matrix.package }}
           -warnaserror -v minimal
 
-  # The format writers never touch Navisworks, so they are version-independent
-  # and only need checking once.
+  # The format writers and the whole 4D layer — sequencing, name classification,
+  # schedule parsing, task matching — never touch Navisworks, so they are
+  # version-independent and only need checking once.
   writer-tests:
-    name: Writer tests
+    name: Writer and 4D tests
     runs-on: ubuntu-latest
 
     steps:
