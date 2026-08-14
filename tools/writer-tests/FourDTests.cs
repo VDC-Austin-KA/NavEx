@@ -41,6 +41,7 @@ namespace NavEx
             MissingRequiredColumns();
             Matching();
             RememberedDecisions();
+            ScaleToTasksDistribution();
 
             Console.WriteLine();
             Console.WriteLine(_failures == 0
@@ -427,6 +428,69 @@ namespace NavEx
             Check("the remembered decision survives a re-import",
                   reimported[0].Target == targets[1] && reimported[0].State == MatchState.Manual,
                   Describe(reimported[0]));
+        }
+
+        // ── Scale to tasks ───────────────────────────────────────────────────
+
+        private static void ScaleToTasksDistribution()
+        {
+            // Even split: 6 sets, 3 tasks -> 2 each, no remainder.
+            var evenSets = new List<MatchTarget>
+            {
+                Target("00280_L02_ARCS_DRYW"),
+                Target("00840_L05_STRC_DECK"),
+                Target("00240_L02_STRC_DECK"),
+                Target("00872_L05_ARCS_CWAL"),
+                Target("00868_L05_ARCS_FRMG"),
+                Target("00100_L01_STRC_DECK"),
+            };
+            var threeTasks = new List<ScheduleTask> { Task("Task A", ""), Task("Task B", ""), Task("Task C", "") };
+
+            List<ScaleAssignment> even = ScaleToTasks.Distribute(evenSets, threeTasks, new ScaleOptions());
+            Check("even split assigns every set", even.Count == evenSets.Count, even.Count.ToString(CultureInfo.InvariantCulture));
+
+            var evenCounts = threeTasks.ToDictionary(t => t, t => even.Count(a => a.Task == t));
+            Check("even split gives each task exactly 2", evenCounts.Values.All(c => c == 2),
+                  string.Join(",", evenCounts.Values.Select(c => c.ToString(CultureInfo.InvariantCulture))));
+
+            // Ordering follows sequence code: task A (first task) should receive
+            // the two lowest-coded sets, in ascending order.
+            List<MatchTarget> taskASets = even.Where(a => a.Task == threeTasks[0]).Select(a => a.Set).ToList();
+            Check("ordering follows sequence code, not input order",
+                  taskASets.Count == 2 &&
+                  taskASets[0].SetName == "00100_L01_STRC_DECK" &&
+                  taskASets[1].SetName == "00240_L02_STRC_DECK",
+                  string.Join(" | ", taskASets.Select(s => s.SetName)));
+
+            Check("every assignment carries a reason", even.All(a => !string.IsNullOrEmpty(a.Reason)));
+
+            // Uneven remainder: 7 sets, 3 tasks -> 3,2,2, remainder to the
+            // earliest task(s).
+            var sevenSets = new List<MatchTarget>(evenSets) { Target("00900_L06_ARCS_CWAL") };
+            List<ScaleAssignment> uneven = ScaleToTasks.Distribute(sevenSets, threeTasks, new ScaleOptions());
+            var unevenCounts = threeTasks.Select(t => uneven.Count(a => a.Task == t)).ToList();
+            Check("uneven remainder is 3,2,2",
+                  unevenCounts.Count == 3 && unevenCounts[0] == 3 && unevenCounts[1] == 2 && unevenCounts[2] == 2,
+                  string.Join(",", unevenCounts.Select(c => c.ToString(CultureInfo.InvariantCulture))));
+            Check("no task is left empty when sets >= tasks", unevenCounts.All(c => c > 0));
+
+            // Fewer sets than tasks: 2 sets, 3 tasks -> two tasks get one set,
+            // one task is legitimately left empty.
+            var twoSets = new List<MatchTarget> { Target("00840_L05_STRC_DECK"), Target("00100_L01_STRC_DECK") };
+            List<ScaleAssignment> scarce = ScaleToTasks.Distribute(twoSets, threeTasks, new ScaleOptions());
+            var scarceCounts = threeTasks.Select(t => scarce.Count(a => a.Task == t)).ToList();
+            Check("fewer sets than tasks assigns every set exactly once",
+                  scarce.Count == 2, scarce.Count.ToString(CultureInfo.InvariantCulture));
+            Check("fewer sets than tasks leaves exactly one task empty",
+                  scarceCounts.Count(c => c == 0) == 1,
+                  string.Join(",", scarceCounts.Select(c => c.ToString(CultureInfo.InvariantCulture))));
+
+            // Idempotent re-run: distributing the same inputs twice yields the
+            // same set-to-task pairing.
+            List<ScaleAssignment> rerun = ScaleToTasks.Distribute(evenSets, threeTasks, new ScaleOptions());
+            bool sameEveryTime = even.Count == rerun.Count &&
+                Enumerable.Range(0, even.Count).All(i => even[i].Set == rerun[i].Set && even[i].Task == rerun[i].Task);
+            Check("re-running with the same inputs is idempotent", sameEveryTime);
         }
 
         private static MatchTarget Target(string name)
