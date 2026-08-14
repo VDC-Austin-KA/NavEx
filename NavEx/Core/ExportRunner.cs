@@ -174,6 +174,9 @@ namespace NavEx.Core
                     case ExportFormat.Fbx:
                         written = new FbxWriter(_options).Write(scene, path);
                         break;
+                    case ExportFormat.Datasmith:
+                        written = new DatasmithWriter(_options).Write(scene, path);
+                        break;
                     default:
                         written = new GltfWriter(_options).Write(scene, path);
                         break;

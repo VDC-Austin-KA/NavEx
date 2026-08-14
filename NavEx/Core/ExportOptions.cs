@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using Autodesk.Navisworks.Api;
+using NavEx.FourD;
 
 namespace NavEx.Core
 {
@@ -18,7 +19,9 @@ namespace NavEx.Core
         /// <summary>Wavefront .obj plus .mtl.</summary>
         Obj,
         /// <summary>FBX ASCII 7.x, hand-written — geometry only.</summary>
-        Fbx
+        Fbx,
+        /// <summary>.udatasmith XML plus payload folder, with embedded pixmy.* schedule linkage.</summary>
+        Datasmith
     }
 
     /// <summary>How extracted triangles get grouped into glTF nodes.</summary>
@@ -107,6 +110,17 @@ namespace NavEx.Core
         /// <summary>Property categories to include in the sidecar; empty means all.</summary>
         public List<string> PropertyCategoryFilter = new List<string>();
 
+        /// <summary>
+        /// Optional 4D task linkage for Datasmith's embedded pixmy.* metadata, keyed by
+        /// selection-set name (case-insensitive) — the same name NavEx already stamps into
+        /// each node's "navex:set" extra. Left null/empty, DatasmithWriter simply emits no
+        /// pixmy.task.* fields (legal per the schedule-link contract's absence behaviour),
+        /// so a user who never touches the 4D tab or never exports Datasmith pays nothing.
+        /// This is the only point where the exporter and the 4D layer connect.
+        /// </summary>
+        public Dictionary<string, ScheduleTask> DatasmithTaskLinks =
+            new Dictionary<string, ScheduleTask>(StringComparer.OrdinalIgnoreCase);
+
         // ── Engine ────────────────────────────────────────────────────────────
         /// <summary>Items per COM selection round-trip. Larger is faster but less responsive.</summary>
         public int ComBatchSize = 500;
@@ -157,6 +171,7 @@ namespace NavEx.Core
                 case ExportFormat.Glb: return ".glb";
                 case ExportFormat.Obj: return ".obj";
                 case ExportFormat.Fbx: return ".fbx";
+                case ExportFormat.Datasmith: return ".udatasmith";
                 default: return ".gltf";
             }
         }

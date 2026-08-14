@@ -38,5 +38,6 @@
     <Compile Include="../../NavEx/Core/Exporters/GltfWriter.cs" />
     <Compile Include="../../NavEx/Core/Exporters/ObjWriter.cs" />
     <Compile Include="../../NavEx/Core/Exporters/FbxWriter.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/DatasmithWriter.cs" />
   </ItemGroup>
 </Project>
