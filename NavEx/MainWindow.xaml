@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctrl="clr-namespace:NavEx.Controls"
+        xmlns:fourd="clr-namespace:NavEx.FourD"
         Title="NavEx — Navisworks Geometry Exporter"
         Height="720" Width="1040"
         MinHeight="560" MinWidth="880"
@@ -367,11 +368,24 @@
                         <DockPanel Margin="0,8,0,0">
                             <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,8">
                                 <StackPanel>
-                                    <StackPanel Orientation="Horizontal">
+                                    <!-- A WrapPanel, not a StackPanel: this row is now wider than
+                                         the window's minimum, and clipped buttons are unreachable. -->
+                                    <WrapPanel Orientation="Horizontal">
+                                        <Button Content="Read TimeLiner" MinWidth="122"
+                                                Style="{StaticResource PrimaryButton}" Click="OnReadTimeliner"
+                                                ToolTip="Load the schedule already in this model's TimeLiner — no file needed."/>
                                         <Button Content="Import schedule…" MinWidth="130" Click="OnImportSchedule"/>
                                         <Button Content="Re-map columns…" MinWidth="128" Click="OnRemapColumns"/>
                                         <Button Content="Match to model" MinWidth="118" Click="OnMatchTasks"/>
-                                        <Button Content="Sync to TimeLiner" MinWidth="132"
+                                        <TextBlock Text="Write" VerticalAlignment="Center" Margin="14,0,6,0"
+                                                   Foreground="{StaticResource Muted}"/>
+                                        <ComboBox x:Name="WriteModeCombo" Width="96" Margin="0">
+                                            <ComboBoxItem Content="Update" Tag="Update" IsSelected="True"
+                                                          ToolTip="Update tasks that already exist, add the rest."/>
+                                            <ComboBoxItem Content="Replace" Tag="Replace"
+                                                          ToolTip="Delete every TimeLiner task first, then write this list."/>
+                                        </ComboBox>
+                                        <Button Content="Write to TimeLiner" MinWidth="132" Margin="6,0,0,0"
                                                 Style="{StaticResource PrimaryButton}" Click="OnSyncTimeliner"/>
                                         <Button Content="Export CSV" MinWidth="96" Click="OnExportTimelinerCsv"/>
                                         <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="14,0,6,0"
@@ -384,10 +398,10 @@
                                             <ComboBoxItem Content="Quarter" Tag="Quarter"/>
                                         </ComboBox>
                                         <Button Content="Fit" MinWidth="52" Margin="6,0,0,0" Click="OnGanttFit"/>
-                                    </StackPanel>
+                                    </WrapPanel>
                                     <TextBlock x:Name="ScheduleStatusText" Style="{StaticResource Hint}"
                                                Margin="0,8,0,0"
-                                               Text="No schedule loaded. Import a P6 XER/XML, MS Project XML, or any CSV export."/>
+                                               Text="No schedule loaded. Read the model's own TimeLiner, or import a P6 XER/XML, MS Project XML, or any CSV export."/>
                                 </StackPanel>
                             </Border>
 
@@ -413,6 +427,38 @@
                                                            FontWeight="SemiBold" Text="—"/>
                                                 <TextBlock x:Name="DetailDates" Style="{StaticResource Hint}"/>
                                                 <TextBlock x:Name="DetailDescription" Style="{StaticResource Hint}"/>
+
+                                                <!-- Editing the task here is what makes writing back
+                                                     to TimeLiner worth doing. -->
+                                                <TextBlock Style="{StaticResource FieldLabel}"
+                                                           Text="Name" Margin="0,8,0,3"/>
+                                                <TextBox x:Name="EditNameBox" Padding="4,3"/>
+                                                <Grid Margin="0,4,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Margin="0,0,3,0">
+                                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Start"/>
+                                                        <TextBox x:Name="EditStartBox" Padding="4,3"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Margin="3,0,0,0">
+                                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Finish"/>
+                                                        <TextBox x:Name="EditFinishBox" Padding="4,3"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                                <TextBlock Style="{StaticResource FieldLabel}"
+                                                           Text="Task type" Margin="0,4,0,3"/>
+                                                <ComboBox x:Name="EditTypeCombo" IsEditable="True">
+                                                    <ComboBoxItem Content="Construct"/>
+                                                    <ComboBoxItem Content="Demolish"/>
+                                                    <ComboBoxItem Content="Temporary"/>
+                                                </ComboBox>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                    <Button Content="Apply edit" MinWidth="82" Click="OnApplyTaskEdit"/>
+                                                    <Button Content="Revert" MinWidth="72" Click="OnRevertTaskEdit"/>
+                                                </StackPanel>
+                                                <TextBlock x:Name="EditStatusText" Style="{StaticResource Hint}"/>
 
                                                 <TextBlock Style="{StaticResource SectionHeader}"
                                                            Text="Attached set" Margin="0,10,0,6"/>
@@ -467,6 +513,8 @@
                                                Text="Each loaded file classified by discipline, level and work scope, sorted by its 4D code. This is the order the exported folder will list in."/>
                                     <Button DockPanel.Dock="Top" Content="Classify loaded models" HorizontalAlignment="Left"
                                             MinWidth="160" Margin="0,0,0,8" Click="OnClassifyModels"/>
+                                    <TextBlock DockPanel.Dock="Bottom" x:Name="ModelStatusText"
+                                               Style="{StaticResource Hint}" Margin="0,6,0,0"/>
                                     <ListBox x:Name="ModelListBox" FontFamily="Consolas" FontSize="11"
                                              BorderBrush="{StaticResource Line}"/>
                                 </DockPanel>
@@ -515,6 +563,180 @@
                                 </DockPanel>
                             </Border>
                         </Grid>
+                    </TabItem>
+
+                    <!-- Identifiers: the project's own naming vocabulary -->
+                    <TabItem Header=" Identifiers ">
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="360"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Style="{StaticResource Card}" Margin="0,0,6,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                                               Text="Your identifiers"/>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}"
+                                               Text="Teach NavEx what your names mean. A rule maps a pattern onto a discipline, an activity, a level, or any combination — and beats the built-in dictionary. Match on a whole token, on any part of the name, or on a regular expression. Rules are shared by every model you open."/>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button Content="Add rule" MinWidth="80" Click="OnAddRule"/>
+                                        <Button Content="Remove" MinWidth="72" Click="OnRemoveRule"/>
+                                        <Button Content="Apply" MinWidth="72" Style="{StaticResource PrimaryButton}"
+                                                Click="OnApplyIdentifiers"/>
+                                        <Button Content="Import…" MinWidth="80" Click="OnImportIdentifiers"/>
+                                        <Button Content="Export…" MinWidth="80" Click="OnExportIdentifiers"/>
+                                        <Button Content="Load samples" MinWidth="106" Click="OnLoadSampleIdentifiers"/>
+                                    </StackPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" x:Name="IdentifierStatusText"
+                                               Style="{StaticResource Hint}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                    <ListBox x:Name="RuleListBox" BorderBrush="{StaticResource Line}"
+                                             HorizontalContentAlignment="Stretch" FontSize="11">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="82"/>
+                                                        <ColumnDefinition Width="58"/>
+                                                        <ColumnDefinition Width="58"/>
+                                                        <ColumnDefinition Width="56"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                              VerticalAlignment="Center" Margin="0,0,6,0"
+                                                              ToolTip="Untick to keep the rule but stop applying it."/>
+                                                    <TextBox Grid.Column="1" Text="{Binding Pattern, Mode=TwoWay}"
+                                                             Margin="2,0" Padding="3,2" ToolTip="Pattern"/>
+                                                    <ComboBox Grid.Column="2" Margin="2,0"
+                                                              SelectedItem="{Binding Mode, Mode=TwoWay}"
+                                                              ItemsSource="{x:Static fourd:RuleRow.Modes}"
+                                                              ToolTip="How the pattern is compared"/>
+                                                    <TextBox Grid.Column="3" Text="{Binding Discipline, Mode=TwoWay}"
+                                                             Margin="2,0" Padding="3,2" ToolTip="Discipline code, e.g. ARCS"/>
+                                                    <TextBox Grid.Column="4" Text="{Binding Activity, Mode=TwoWay}"
+                                                             Margin="2,0" Padding="3,2" ToolTip="Activity code, e.g. WALL"/>
+                                                    <TextBox Grid.Column="5" Text="{Binding Level, Mode=TwoWay}"
+                                                             Margin="2,0" Padding="3,2" ToolTip="Optional level tag, e.g. ROOF"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="6,0,0,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                                               Text="Try a name"/>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}"
+                                               Text="Type any set or file name to see how it classifies right now, and why."/>
+                                    <TextBox DockPanel.Dock="Top" x:Name="TestNameBox" Padding="4,3"
+                                             TextChanged="OnTestNameChanged"/>
+                                    <Border DockPanel.Dock="Top" Background="#FFF6F8FA" Padding="8" Margin="0,6,0,10"
+                                            BorderBrush="{StaticResource Line}" BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock x:Name="TestResultText" FontFamily="Consolas" FontSize="12"
+                                                       TextWrapping="Wrap" Text="—"/>
+                                            <TextBlock x:Name="TestBasisText" Style="{StaticResource Hint}"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                                               Text="Your activities"/>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}"
+                                               Text="Scopes the built-in table has no code for. Four letters, a discipline, the lag and cycle order that place it in the build, and any names it answers to."/>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button Content="Add activity" MinWidth="92" Click="OnAddCustomActivity"/>
+                                        <Button Content="Remove" MinWidth="72" Click="OnRemoveCustomActivity"/>
+                                    </StackPanel>
+                                    <ListBox x:Name="CustomActivityListBox" BorderBrush="{StaticResource Line}"
+                                             HorizontalContentAlignment="Stretch" FontSize="11">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,2">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="52"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="52"/>
+                                                            <ColumnDefinition Width="42"/>
+                                                            <ColumnDefinition Width="42"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Text="{Binding Code, Mode=TwoWay}" Margin="1,0"
+                                                                 Padding="3,2" FontFamily="Consolas" ToolTip="Code"/>
+                                                        <TextBox Grid.Column="1" Text="{Binding DisplayName, Mode=TwoWay}"
+                                                                 Margin="1,0" Padding="3,2" ToolTip="Display name"/>
+                                                        <TextBox Grid.Column="2" Text="{Binding DisciplineCode, Mode=TwoWay}"
+                                                                 Margin="1,0" Padding="3,2" ToolTip="Discipline"/>
+                                                        <TextBox Grid.Column="3" Text="{Binding Lag, Mode=TwoWay}"
+                                                                 Margin="1,0" Padding="3,2" ToolTip="Lag floors"/>
+                                                        <TextBox Grid.Column="4" Text="{Binding Order, Mode=TwoWay}"
+                                                                 Margin="1,0" Padding="3,2" ToolTip="Cycle order"/>
+                                                    </Grid>
+                                                    <TextBox Text="{Binding Aliases, Mode=TwoWay}" Margin="1,2,1,0"
+                                                             Padding="3,2" ToolTip="Names it answers to, separated by ;"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- Grouping: file the sets into folders -->
+                    <TabItem Header=" Grouping ">
+                        <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                                           Text="File search sets into folders"/>
+                                <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}"
+                                           Text="Uses the same identity as the renamer, so anything your identifiers taught it applies here too. Nothing moves until you press Apply; untick any row to leave that set where it is."/>
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Group by" VerticalAlignment="Center" Margin="0,0,6,0"
+                                               Foreground="{StaticResource Muted}"/>
+                                    <ComboBox x:Name="GroupByCombo" Width="150">
+                                        <ComboBoxItem Content="Discipline" Tag="Discipline" IsSelected="True"/>
+                                        <ComboBoxItem Content="Level" Tag="Level"/>
+                                        <ComboBoxItem Content="Activity" Tag="Activity"/>
+                                        <ComboBoxItem Content="Level, then discipline" Tag="LevelThenDiscipline"/>
+                                    </ComboBox>
+                                    <Button Content="Propose" MinWidth="86" Margin="6,0,0,0" Click="OnProposeGrouping"/>
+                                    <Button Content="Apply" MinWidth="86" Style="{StaticResource PrimaryButton}"
+                                            Click="OnApplyGrouping"/>
+                                </StackPanel>
+                                <TextBlock DockPanel.Dock="Bottom" x:Name="GroupStatusText"
+                                           Style="{StaticResource Hint}" Margin="0,6,0,0"/>
+                                <ListBox x:Name="GroupListBox" BorderBrush="{StaticResource Line}"
+                                         HorizontalContentAlignment="Stretch" FontSize="11">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox IsChecked="{Binding Apply, Mode=TwoWay}"
+                                                          VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock FontFamily="Consolas" FontSize="11"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <Run Text="{Binding TargetFolder, Mode=OneWay}"/><Run Text="  /  "/><Run Text="{Binding SetName, Mode=OneWay}"/>
+                                                    </TextBlock>
+                                                    <TextBlock FontSize="10" Foreground="#FF6B7280"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <Run Text="from "/><Run Text="{Binding CurrentFolder, Mode=OneWay}"/>
+                                                        <Run Text="  ·  "/><Run Text="{Binding Note, Mode=OneWay}"/>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                        </Border>
                     </TabItem>
 
                     <!-- Sequence: the lag/order table that drives the codes -->

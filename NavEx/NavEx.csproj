@@ -144,6 +144,7 @@
     <Compile Include="Core\FourD\TimelinerBridge.cs" />
     <Compile Include="Core\FourD\SetRenamer.cs" />
     <Compile Include="Core\FourD\FourDStore.cs" />
+    <Compile Include="Core\FourD\IdentifierLibrary.cs" />
     <Compile Include="Controls\GanttView.cs" />
     <Compile Include="ColumnMappingWindow.cs" />
     <Compile Include="MainWindow.FourD.cs">

@@ -169,14 +169,73 @@ cover all three. `L01_ARCS`, `Level 1 - Architectural`, and
 `ARCH-L01-Framing.nwc` all resolve identically, and longest-alias-wins means
 "Curtain Wall" is glazing rather than a generic wall.
 
+The dictionary covers the plain model categories, not only the trade vocabulary:
+`Walls`, `Floors`, `Ceilings`, `Roofs`, `Railings`, `Stairs`, `Ducts`, `Pipes`,
+`Structural Framing`, `Generic Models`, `Miscellaneous` and the rest all classify
+straight out of a Revit or Navisworks export. Specificity still decides ties, so
+a structural wall sequences with the structure and a curtain wall with the skin,
+while a bare "Walls" set lands with the partitions.
+
+"Floor" is both a level word and a category name, so the level is read first and
+the phrase that produced it is taken out of the name before anything else looks
+at it. `3rd Floor Plumbing` is level 3 plumbing; `Floors` is a slab.
+
 Batch renaming is preview-first: you get a proposal per set with the reason it
 was classified that way, and nothing is renamed until you press Apply. Sets the
 classifier could not fully resolve are shown but left unticked — a guessed
 sequence number sorts the folder wrong, which is worse than no number at all.
 
-### Importing a schedule
+### Teaching it your own names
 
-Reads P6 XER, P6 XML, MS Project XML and any delimited text. Column detection
+No shipped dictionary covers a particular office's vocabulary. The
+**Identifiers** sub-tab is where you add it, once, for every model you open.
+
+A **rule** maps a pattern onto a discipline, an activity, a level, or any
+combination, and outranks the built-in dictionary. It can match a whole token, any
+part of the name, or a regular expression:
+
+| Pattern | Match | → | Meaning |
+|---|---|---|---|
+| `Misc` | token | `MISC` `MISC` | your catch-all sets |
+| `Generic Models` | contains | `MISC` `MISC` | Revit's own category name |
+| `^WD-?\d+` | regex | `ARCS` `DRYW` | a work-package prefix |
+| `P-DECK` | token | ` ` `ROOF` | a level your project names its own way |
+
+Rules compose: one can name the discipline and another the activity, so narrow
+rules stack instead of each having to restate everything. Longer patterns win by
+default; an explicit priority overrides that. Any rule can be unticked to keep it
+without applying it.
+
+Scopes the built-in table has no code for get their own **activity** — four
+letters, a discipline, the lag and cycle order that place it in the build, and the
+names it answers to. A custom activity sequences exactly like a built-in one and
+appears in the **Sequence** table; giving it the code of a built-in replaces that
+built-in rather than competing with it.
+
+Type a real set name into **Try a name** to see the code it would get and which
+rule or alias produced it. The library lives in
+`%AppData%\NavEx\4D\identifiers.txt` — one file per machine, not per document —
+and Import/Export merge it with a colleague's.
+
+### Regrouping search sets
+
+The **Grouping** sub-tab files sets into folders by discipline, level, activity,
+or level-then-discipline, using the same identity as the renamer — so anything
+your identifiers taught it applies here too. Sets with nothing to file them by go
+to `ZZ Unsorted` rather than to a folder named after a guess. Like the rename, it
+is preview-first and moves nothing until you press Apply; the sets keep their
+names, so clash tests and viewpoints that reference them are unaffected.
+
+### Getting a schedule in
+
+**Read TimeLiner** loads the schedule the model already has. That is the common
+case — somebody linked P6 to TimeLiner months ago, or built the tasks by hand —
+and it needs no file, no export and no column mapping. Tasks come back with their
+dates, task types, synchronisation IDs and WBS path, and any set TimeLiner
+already has attached is carried in as a match you made rather than one to
+re-derive. Pressing **Match to model** with nothing loaded reads TimeLiner too.
+
+Or import a file: P6 XER, P6 XML, MS Project XML and any delimited text. Column detection
 runs on header aliases first, then on value shape for anything left over, which
 is what rescues P6's internal names (`target_start_date`) and headerless exports.
 
@@ -202,15 +261,28 @@ unmatched, which is the correct answer.
 Manual corrections are remembered per document and keyed on the task ID, so
 re-importing an updated schedule refreshes dates and keeps every human decision.
 
-### Sending it to TimeLiner
+### Editing tasks, and writing them back
+
+Select a task in the Gantt and its name, planned dates and task type are editable
+in the panel beside it. Edits land in NavEx's copy and become real on the next
+write, the same preview-then-commit shape the renamer uses.
+
+**Write to TimeLiner** has two modes:
+
+- **Update** — tasks that already exist are updated in place, the rest are added.
+  Existing tasks are found by the object they were read from first, then by
+  synchronisation ID, then by name, and at any depth in the task tree. The handle
+  is what makes a rename land on the task you renamed instead of forking it.
+- **Replace** — every existing task is deleted first, then this list is written.
+  It confirms before doing anything, and says plainly that the result is a flat
+  list and that anything added outside NavEx is lost.
 
 The TimeLiner managed API lives in `Autodesk.Navisworks.Timeliner.dll`, which
 ships inside Navisworks but is not redistributable and is not on NuGet.
 Referencing it directly would mean NavEx could only be compiled on a machine with
 Navisworks installed, and would pin one build to one release. So the bridge binds
-late, looks up every member defensively, and reports rather than throws. Tasks
-matching an existing TimeLiner task by name are updated in place instead of
-duplicated. If the bridge cannot bind at all, NavEx writes a CSV that TimeLiner's
+late, looks up every member defensively, and reports rather than throws — reading
+included. If the bridge cannot bind at all, NavEx writes a CSV that TimeLiner's
 own data-source import reads.
 
 ## Format notes
