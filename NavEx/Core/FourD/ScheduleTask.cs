@@ -44,6 +44,18 @@ namespace NavEx.FourD
         /// <summary>Every column as imported, so nothing is lost on a re-export.</summary>
         public readonly Dictionary<string, string> Raw = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// The object this task was read from, when it came from somewhere that
+        /// can be written back to — today, a TimeLiner task.
+        ///
+        /// Held opaquely so this class stays free of Navisworks types (and keeps
+        /// running under the platform-independent tests). It is what makes an edit
+        /// land on the task the user actually edited: without it a renamed task
+        /// would be matched by its new name, find nothing, and be created a second
+        /// time alongside the original.
+        /// </summary>
+        public object SourceHandle;
+
         public bool IsValid
         {
             get { return !string.IsNullOrWhiteSpace(Name) && PlannedStart.HasValue && PlannedFinish.HasValue; }

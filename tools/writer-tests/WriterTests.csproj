@@ -26,6 +26,8 @@
     <Compile Include="WriterFormatTests.cs" />
     <Compile Include="../../NavEx/Core/FourD/SequenceModel.cs" />
     <Compile Include="../../NavEx/Core/FourD/FourDName.cs" />
+    <Compile Include="../../NavEx/Core/FourD/IdentifierLibrary.cs" />
+    <Compile Include="../../NavEx/Core/Log.cs" />
     <Compile Include="../../NavEx/Core/FourD/ScheduleTask.cs" />
     <Compile Include="../../NavEx/Core/FourD/ScheduleImporter.cs" />
     <Compile Include="../../NavEx/Core/FourD/TaskMatcher.cs" />

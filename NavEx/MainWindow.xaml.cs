@@ -667,6 +667,13 @@ namespace NavEx
             catch (Exception) { return fallback; }
         }
 
+        /// <summary>The selected item's Tag as text, for combos whose values are not an enum.</summary>
+        private static string TagText(ComboBox combo)
+        {
+            var item = combo == null ? null : combo.SelectedItem as ComboBoxItem;
+            return item == null || item.Tag == null ? "" : Convert.ToString(item.Tag);
+        }
+
         private static double ParseDouble(string text, double fallback)
         {
             double value;

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using NavEx.Core;
 
@@ -167,6 +168,139 @@ namespace NavEx.FourD
             DisciplineCode = activity.DisciplineCode;
             Lag = activity.LagFloors;
             Order = activity.CycleOrder;
+        }
+    }
+
+    /// <summary>
+    /// Editable row backing the identifier table.
+    ///
+    /// A separate type from <see cref="IdentifierRule"/> because WPF binds to
+    /// properties and the rule is plain fields, and because a half-typed row —
+    /// a pattern with no target yet — has to be able to sit in the grid without
+    /// being a rule the classifier would try to use.
+    /// </summary>
+    public class RuleRow
+    {
+        public string Pattern { get; set; }
+        public string Mode { get; set; }
+        public string Discipline { get; set; }
+        public string Activity { get; set; }
+        public string Level { get; set; }
+        public bool Enabled { get; set; }
+        public string Note { get; set; }
+
+        public static readonly string[] Modes = { "token", "contains", "regex" };
+
+        public RuleRow()
+        {
+            Pattern = "";
+            Mode = Modes[0];
+            Discipline = "";
+            Activity = "";
+            Level = "";
+            Enabled = true;
+            Note = "";
+        }
+
+        public RuleRow(IdentifierRule rule) : this()
+        {
+            if (rule == null) return;
+            Pattern = rule.Pattern ?? "";
+            Mode = rule.Match.ToString().ToLowerInvariant();
+            Discipline = rule.DisciplineCode ?? "";
+            Activity = rule.ActivityCode ?? "";
+            Level = rule.LevelTag ?? "";
+            Enabled = rule.Enabled;
+            Note = rule.Note ?? "";
+        }
+
+        public IdentifierRule ToRule()
+        {
+            RuleMatch match;
+            switch ((Mode ?? "").Trim().ToLowerInvariant())
+            {
+                case "contains": match = RuleMatch.Contains; break;
+                case "regex": match = RuleMatch.Regex; break;
+                default: match = RuleMatch.Token; break;
+            }
+
+            return new IdentifierRule
+            {
+                Pattern = (Pattern ?? "").Trim(),
+                Match = match,
+                DisciplineCode = (Discipline ?? "").Trim().ToUpperInvariant(),
+                ActivityCode = (Activity ?? "").Trim().ToUpperInvariant(),
+                LevelTag = (Level ?? "").Trim().ToUpperInvariant(),
+                Enabled = Enabled,
+                Note = (Note ?? "").Trim()
+            };
+        }
+    }
+
+    /// <summary>Editable row backing the project's own activity definitions.</summary>
+    public class CustomActivityRow
+    {
+        public string Code { get; set; }
+        public string DisplayName { get; set; }
+        public string DisciplineCode { get; set; }
+        public int Lag { get; set; }
+        public int Order { get; set; }
+        public string Aliases { get; set; }
+
+        public CustomActivityRow()
+        {
+            Code = "";
+            DisplayName = "";
+            DisciplineCode = "ARCS";
+            Lag = 6;
+            Order = 50;
+            Aliases = "";
+        }
+
+        public CustomActivityRow(Activity activity) : this()
+        {
+            if (activity == null) return;
+            Code = activity.Code;
+            DisplayName = activity.DisplayName;
+            DisciplineCode = activity.DisciplineCode;
+            Lag = activity.LagFloors;
+            Order = activity.CycleOrder;
+
+            // The code is always the first alias; showing it back would invite
+            // someone to delete it.
+            var extra = new List<string>();
+            foreach (string alias in activity.Aliases ?? new string[0])
+                if (!string.Equals(alias, activity.Code, StringComparison.OrdinalIgnoreCase)) extra.Add(alias);
+            Aliases = string.Join("; ", extra.ToArray());
+        }
+
+        public Activity ToActivity()
+        {
+            var aliases = new List<string> { (Code ?? "").Trim().ToUpperInvariant() };
+            foreach (string part in (Aliases ?? "").Split(';', ','))
+            {
+                string alias = NameClassifier.Squash(part);
+                if (alias.Length > 0 && !aliases.Contains(alias)) aliases.Add(alias);
+            }
+
+            return new Activity((Code ?? "").Trim().ToUpperInvariant(),
+                                (DisplayName ?? "").Trim(),
+                                (DisciplineCode ?? "").Trim().ToUpperInvariant(),
+                                Lag, Order, aliases.ToArray());
+        }
+
+        /// <summary>Null when the row is usable; otherwise why it will be dropped.</summary>
+        public string Validate()
+        {
+            string code = (Code ?? "").Trim();
+            if (code.Length == 0) return "no code";
+
+            // The rendered name is fixed-width by design: four letters, or the
+            // whole scheme stops sorting.
+            if (code.Length != 4 || !code.All(char.IsLetter))
+                return "'" + code + "' must be exactly four letters";
+            if (string.IsNullOrWhiteSpace(DisciplineCode)) return "no discipline";
+            return null;
         }
     }
 }

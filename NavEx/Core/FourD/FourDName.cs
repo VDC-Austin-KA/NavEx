@@ -159,6 +159,9 @@ namespace NavEx.FourD
             _profile = profile ?? new SequenceProfile();
         }
 
+        /// <summary>The sequencing table and identifier library this classifier reads.</summary>
+        public SequenceProfile Profile { get { return _profile; } }
+
         public FourDName Classify(string rawName) { return Classify(rawName, null); }
 
         /// <summary>
@@ -172,20 +175,52 @@ namespace NavEx.FourD
             if (existing != null) return existing;
 
             string combined = (rawName ?? "") + " " + (context ?? "");
-            List<string> tokens = Tokenize(combined);
+            var basis = new List<string>();
+            double score = 0;
+
+            // The level is read first, and the phrase that produced it is taken
+            // out of the text before anything else looks at it.
+            //
+            // That ordering is what makes the plain category names work. "Floor"
+            // is both a level word and the Revit category for a structural slab,
+            // so "3rd floor plumbing" and "Floors" have to be told apart — and the
+            // only reliable difference is that the first one already spent its
+            // FLOOR token on a level.
+            int levelIndex;
+            string residual;
+            bool levelFound = TryMatchLevel(combined, null, out levelIndex, out residual);
+            if (levelFound) { basis.Add("level " + FourDName.LevelTagFor(levelIndex)); score += 0.3; }
 
             // Aliases are stored concatenated ("CURTAINWALL"), but real names
             // separate the words ("Curtain Wall"). Adding the whole string with
             // its separators stripped lets the substring rule bridge the two.
-            tokens.Add(Squash(combined));
-            var basis = new List<string>();
-            double score = 0;
+            List<string> tokens = Tokenize(residual);
+            tokens.Add(Squash(residual));
 
-            string disciplineCode = MatchDiscipline(tokens, basis, ref score);
-            Activity activity = MatchActivity(tokens, disciplineCode, basis, ref score);
-            int levelIndex;
-            bool levelFound = TryMatchLevel(combined, tokens, out levelIndex);
-            if (levelFound) { basis.Add("level " + FourDName.LevelTagFor(levelIndex)); score += 0.3; }
+            // Rules read the untouched name: a site's own vocabulary may well live
+            // inside the part the level matcher consumed.
+            List<string> ruleTokens = Tokenize(combined);
+            ruleTokens.Add(Squash(combined));
+
+            RuleHit hit = ApplyRules(ruleTokens, Squash(combined), combined, basis, ref score);
+            if (hit.LevelIndex.HasValue)
+            {
+                levelIndex = hit.LevelIndex.Value;
+                levelFound = true;
+            }
+
+            string disciplineCode = hit.DisciplineCode;
+            if (string.IsNullOrEmpty(disciplineCode))
+                disciplineCode = MatchDiscipline(tokens, basis, ref score);
+
+            Activity activity = null;
+            if (!string.IsNullOrEmpty(hit.ActivityCode))
+            {
+                activity = _profile.Resolve(hit.ActivityCode);
+                if (activity == null) basis.Add("rule names unknown activity '" + hit.ActivityCode + "'");
+            }
+            if (activity == null)
+                activity = MatchActivity(tokens, disciplineCode, basis, ref score);
 
             // An activity implies its discipline when the name never named one.
             if (string.IsNullOrEmpty(disciplineCode) && activity != null)
@@ -216,6 +251,60 @@ namespace NavEx.FourD
             name.LevelIndex = FourDName.LevelIndexFromTag(name.LevelTag);
             Activity activity = _profile.Resolve(name.ActivityCode);
             name.SequenceCode = SequenceModel.SequenceCode(name.LevelIndex, activity);
+        }
+
+        // ── User rules ───────────────────────────────────────────────────────
+
+        /// <summary>What the project's own identifier rules had to say about a name.</summary>
+        private struct RuleHit
+        {
+            public string DisciplineCode;
+            public string ActivityCode;
+            public int? LevelIndex;
+        }
+
+        /// <summary>
+        /// Runs the library's rules, most specific first, and takes the first
+        /// answer offered for each of the three parts. A rule that only names a
+        /// discipline therefore leaves the activity to the next rule, or to the
+        /// built-in dictionary — which is what lets a handful of narrow rules
+        /// compose instead of each having to restate everything.
+        /// </summary>
+        private RuleHit ApplyRules(List<string> tokens, string squashed, string raw,
+                                   List<string> basis, ref double score)
+        {
+            var hit = new RuleHit();
+
+            foreach (IdentifierRule rule in _profile.ActiveRules())
+            {
+                if (hit.DisciplineCode != null && hit.ActivityCode != null && hit.LevelIndex.HasValue) break;
+                if (!rule.Matches(tokens, squashed, raw)) continue;
+
+                bool used = false;
+
+                if (hit.DisciplineCode == null && !string.IsNullOrEmpty(rule.DisciplineCode))
+                {
+                    hit.DisciplineCode = rule.DisciplineCode;
+                    used = true;
+                }
+                if (hit.ActivityCode == null && !string.IsNullOrEmpty(rule.ActivityCode))
+                {
+                    hit.ActivityCode = rule.ActivityCode;
+                    used = true;
+                }
+                if (!hit.LevelIndex.HasValue && !string.IsNullOrEmpty(rule.LevelTag))
+                {
+                    hit.LevelIndex = FourDName.LevelIndexFromTag(rule.LevelTag);
+                    used = true;
+                }
+
+                if (!used) continue;
+
+                basis.Add("rule '" + rule.Pattern + "'");
+                score += 0.45;
+            }
+
+            return hit;
         }
 
         // ── Token matching ───────────────────────────────────────────────────
@@ -267,7 +356,7 @@ namespace NavEx.FourD
             }
 
             // Exact alias hits first; a bare "S" or "M" must never outrank "STRC".
-            foreach (Discipline discipline in SequenceModel.Disciplines)
+            foreach (Discipline discipline in _profile.AllDisciplines())
             {
                 foreach (string alias in discipline.Aliases)
                 {
@@ -283,7 +372,7 @@ namespace NavEx.FourD
 
             // Single-letter discipline prefixes are only trusted when they stand
             // alone as a token, which is the AIA sheet-code convention.
-            foreach (Discipline discipline in SequenceModel.Disciplines)
+            foreach (Discipline discipline in _profile.AllDisciplines())
             {
                 foreach (string alias in discipline.Aliases)
                 {
@@ -392,12 +481,28 @@ namespace NavEx.FourD
 
         public static bool TryMatchLevel(string raw, List<string> tokens, out int levelIndex)
         {
+            string residual;
+            return TryMatchLevel(raw, tokens, out levelIndex, out residual);
+        }
+
+        /// <summary>
+        /// As above, and additionally reports the name with the phrase that
+        /// produced the level removed.
+        ///
+        /// Only the numbered forms are consumed. The keyword forms — ROOF, SITE,
+        /// GROUND — are left in place because they are the category name as well
+        /// as the level: a set called "Roof" has to keep its ROOF token or it
+        /// classifies as nothing at all.
+        /// </summary>
+        public static bool TryMatchLevel(string raw, List<string> tokens, out int levelIndex, out string residual)
+        {
             levelIndex = 0;
+            residual = raw ?? "";
             if (string.IsNullOrEmpty(raw)) return false;
 
             string upper = raw.ToUpperInvariant();
 
-            if (Regex.IsMatch(upper, @"\bROOF\b|\bPENTHOUSE\b|\bPH\b")) { levelIndex = 99; return true; }
+            if (Regex.IsMatch(upper, @"\bROOFS?\b|\bPENTHOUSE\b|\bPH\b")) { levelIndex = 99; return true; }
             if (Regex.IsMatch(upper, @"\bSITE\b|\bSITEWORK\b|\bCIVIL\b|\bGRADE\b")) { levelIndex = SequenceModel.SiteLevelIndex; return true; }
 
             // Below grade: B1 / BSMT / P2 / LEVEL -1.
@@ -409,13 +514,23 @@ namespace NavEx.FourD
             if (below.Success)
             {
                 int n;
-                if (int.TryParse(below.Groups[1].Value, out n) && n > 0) { levelIndex = -n; return true; }
+                if (int.TryParse(below.Groups[1].Value, out n) && n > 0)
+                {
+                    levelIndex = -n;
+                    residual = Without(raw, below);
+                    return true;
+                }
             }
             Match negative = Regex.Match(upper, Edge + @"(?:L|LVL|LEVEL|FLOOR|FL)\s*-\s*(\d{1,2})" + EdgeEnd);
             if (negative.Success)
             {
                 int n;
-                if (int.TryParse(negative.Groups[1].Value, out n) && n > 0) { levelIndex = -n; return true; }
+                if (int.TryParse(negative.Groups[1].Value, out n) && n > 0)
+                {
+                    levelIndex = -n;
+                    residual = Without(raw, negative);
+                    return true;
+                }
             }
 
             // L01 / LVL2 / LEVEL 03 / FLOOR 4 / FL05.
@@ -423,7 +538,12 @@ namespace NavEx.FourD
             if (numbered.Success)
             {
                 int n;
-                if (int.TryParse(numbered.Groups[1].Value, out n)) { levelIndex = n; return true; }
+                if (int.TryParse(numbered.Groups[1].Value, out n))
+                {
+                    levelIndex = n;
+                    residual = Without(raw, numbered);
+                    return true;
+                }
             }
 
             // "3RD FLOOR", "12TH FLOOR".
@@ -431,12 +551,29 @@ namespace NavEx.FourD
             if (ordinal.Success)
             {
                 int n;
-                if (int.TryParse(ordinal.Groups[1].Value, out n)) { levelIndex = n; return true; }
+                if (int.TryParse(ordinal.Groups[1].Value, out n))
+                {
+                    levelIndex = n;
+                    residual = Without(raw, ordinal);
+                    return true;
+                }
             }
 
             if (Regex.IsMatch(upper, @"\bGROUND\b|\bLOBBY\b|\bGRND\b|\bGF\b")) { levelIndex = 1; return true; }
 
             return false;
+        }
+
+        /// <summary>
+        /// The name with a matched span replaced by a separator. Indexes come from
+        /// the uppercased copy, which is the same length as the original for every
+        /// character an invariant upper-casing leaves alone; the bounds check keeps
+        /// the odd exception from throwing.
+        /// </summary>
+        private static string Without(string raw, Match match)
+        {
+            if (match.Index < 0 || match.Index + match.Length > raw.Length) return raw;
+            return raw.Substring(0, match.Index) + " " + raw.Substring(match.Index + match.Length);
         }
 
         private static string CleanDescription(string raw)

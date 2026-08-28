@@ -33,7 +33,10 @@ namespace NavEx
             HighRiseSortOrder();
             SequenceIsStableAcrossLevels();
             Classification();
+            BasicCategories();
             LevelDetection();
+            IdentifierRules();
+            IdentifierLibraryRoundTrip();
             RoundTrip();
             CsvImport();
             DelimiterAndDates();
@@ -41,6 +44,7 @@ namespace NavEx
             MissingRequiredColumns();
             Matching();
             RememberedDecisions();
+            EditedTaskIdentity();
             ScaleToTasksDistribution();
 
             Console.WriteLine();
@@ -187,7 +191,7 @@ namespace NavEx
             FourDName framing = classifier.Classify("L05_ARCS_Interior Metal Stud Framing");
             Check("metal stud framing -> FRMG", framing.ActivityCode == "FRMG", framing.ActivityCode);
 
-            FourDName unknown = classifier.Classify("Miscellaneous stuff");
+            FourDName unknown = classifier.Classify("Qxjj Zzyt 4471");
             Check("an unmatched name resolves to nothing", !unknown.IsResolved);
             Check("an unmatched name has zero-ish confidence", unknown.Confidence < 0.5);
 
@@ -195,6 +199,214 @@ namespace NavEx
             classifier.DisciplineOverrides["SS"] = "STRC";
             FourDName learned = classifier.Classify("L02_SS_Deck");
             Check("a learned token is honoured", learned.DisciplineCode == "STRC", learned.DisciplineCode);
+        }
+
+        /// <summary>
+        /// The plain model categories. These are the names that actually come out
+        /// of Revit and Navisworks — "Walls", "Floors", "Railings", the
+        /// miscellaneous bucket — and leaving them unresolved made the renamer
+        /// useless on the sets people really have.
+        ///
+        /// Each check also pins the specificity order: a more precise wall must
+        /// always beat the generic one, or every curtain wall in the model
+        /// sequences three floors early.
+        /// </summary>
+        private static void BasicCategories()
+        {
+            var classifier = new NameClassifier(new SequenceProfile());
+
+            var expected = new[]
+            {
+                // name, discipline, activity
+                new[] { "Walls",                "ARCS", "WALL" },
+                new[] { "Basic Wall",           "ARCS", "WALL" },
+                new[] { "L03 Walls",            "ARCS", "WALL" },
+                new[] { "Curtain Wall",         "ARCS", "CWAL" },
+                new[] { "Exterior Walls",       "ARCS", "EXTW" },
+                new[] { "Structural Walls",     "STRC", "CORE" },
+                new[] { "Floors",               "STRC", "DECK" },
+                new[] { "L02 Floors",           "STRC", "DECK" },
+                new[] { "Structural Floor",     "STRC", "DECK" },
+                new[] { "Railings",             "ARCS", "RAIL" },
+                new[] { "Handrail",             "ARCS", "RAIL" },
+                new[] { "Guardrails",           "ARCS", "RAIL" },
+                new[] { "Miscellaneous",        "MISC", "MISC" },
+                new[] { "Generic Models",       "MISC", "MISC" },
+                new[] { "Stairs",               "ARCS", "STAR" },
+                new[] { "Ceilings",             "ARCS", "CEIL" },
+                new[] { "Roofs",                "ARCS", "ROOF" },
+                new[] { "Structural Framing",   "STRC", "FRAM" },
+                new[] { "Structural Columns",   "STRC", "COLS" },
+                new[] { "Ducts",                "MECH", "MEPH" },
+                new[] { "Pipes",                "PLBG", "PLBR" },
+                new[] { "Lighting Fixtures",    "ELEC", "ELET" },
+                new[] { "Furniture",            "INTR", "MILL" },
+            };
+
+            foreach (string[] test in expected)
+            {
+                FourDName name = classifier.Classify(test[0]);
+                Check("'" + test[0] + "' -> " + test[1] + "/" + test[2],
+                      name.DisciplineCode == test[1] && name.ActivityCode == test[2],
+                      name.DisciplineCode + "/" + name.ActivityCode + " (" + name.Basis + ")");
+                Check("'" + test[0] + "' is fully resolved", name.IsResolved);
+            }
+
+            // The level and the category can both be spelled with the word
+            // "floor". The level wins, and its words are then out of play — so a
+            // plumbing task on the third floor must not come back as a slab.
+            FourDName plumbing = classifier.Classify("3RD FLOOR PLUMBING");
+            Check("'3rd floor plumbing' is level 3", plumbing.LevelTag == "L03", plumbing.LevelTag);
+            Check("'3rd floor plumbing' is not a floor slab",
+                  plumbing.ActivityCode != "DECK", plumbing.ActivityCode);
+
+            FourDName drywall = classifier.Classify("FLOOR 12 drywall");
+            Check("'floor 12 drywall' is level 12", drywall.LevelTag == "L12", drywall.LevelTag);
+            Check("'floor 12 drywall' stays drywall", drywall.ActivityCode == "DRYW", drywall.ActivityCode);
+
+            // A name that states its own discipline keeps it, even when the
+            // category it also names belongs to another trade by default.
+            FourDName interior = classifier.Classify("Interior Walls");
+            Check("'Interior Walls' is still a wall", interior.ActivityCode == "WALL", interior.ActivityCode);
+            Check("'Interior Walls' honours the stated discipline",
+                  interior.DisciplineCode == "INTR", interior.DisciplineCode);
+
+            // Railings and stairs go in after the structure they attach to.
+            var profile = new SequenceProfile();
+            Check("railings trail the structure",
+                  profile.Resolve("RAIL").LagFloors > profile.Resolve("DECK").LagFloors);
+            Check("stairs precede the railings on them",
+                  string.CompareOrdinal(SequenceModel.SequenceCode(5, profile.Resolve("STAR")),
+                                        SequenceModel.SequenceCode(5, profile.Resolve("RAIL"))) < 0);
+
+            // Unclassified content must sort last within its cycle, never ahead of
+            // work someone has actually identified.
+            Check("miscellaneous sorts last in its cycle",
+                  profile.Resolve("MISC").CycleOrder >= 99);
+        }
+
+        // ── User-supplied identifiers ────────────────────────────────────────
+
+        /// <summary>
+        /// The whole point of the rule table: a name the built-in dictionary has
+        /// never heard of becomes classifiable because someone said what it means,
+        /// once.
+        /// </summary>
+        private static void IdentifierRules()
+        {
+            var profile = new SequenceProfile();
+            var classifier = new NameClassifier(profile);
+
+            FourDName before = classifier.Classify("WD-14 package");
+            Check("an unknown local code starts unresolved", !before.IsResolved, before.Basis);
+
+            profile.Identifiers.Rules.Add(new IdentifierRule(@"^WD-?\d+", "ARCS", "DRYW")
+            { Match = RuleMatch.Regex });
+
+            FourDName after = classifier.Classify("WD-14 package");
+            Check("a regex rule resolves it", after.IsResolved, after.Basis);
+            Check("the rule sets the activity", after.ActivityCode == "DRYW", after.ActivityCode);
+            Check("the rule is named in the basis", after.Basis.Contains("rule"), after.Basis);
+
+            // A rule beats the built-in dictionary rather than competing with it.
+            profile.Identifiers.Rules.Add(new IdentifierRule("Walls", "STRC", "CORE")
+            { Match = RuleMatch.Token });
+            FourDName overridden = classifier.Classify("Walls");
+            Check("a rule outranks the built-in alias", overridden.ActivityCode == "CORE",
+                  overridden.ActivityCode);
+
+            // A disabled rule is inert.
+            profile.Identifiers.Rules[1].Enabled = false;
+            Check("a disabled rule stops applying",
+                  classifier.Classify("Walls").ActivityCode == "WALL");
+            profile.Identifiers.Rules[1].Enabled = true;
+
+            // Rules compose: one names the discipline, another the activity.
+            var composed = new SequenceProfile();
+            composed.Identifiers.Rules.Add(new IdentifierRule("ZZ", "ELEC", ""));
+            composed.Identifiers.Rules.Add(new IdentifierRule("QQ", "", "ELET"));
+            FourDName both = new NameClassifier(composed).Classify("ZZ QQ L04");
+            Check("two rules compose into one identity",
+                  both.DisciplineCode == "ELEC" && both.ActivityCode == "ELET" && both.LevelTag == "L04",
+                  both.Render(false));
+
+            // A custom activity is sequenced like any other.
+            var custom = new SequenceProfile();
+            custom.Identifiers.Activities.Add(
+                new Activity("SOLR", "Solar array", "ELEC", 10, 97, "SOLAR", "PHOTOVOLTAIC", "PV"));
+            custom.Identifiers.Rules.Add(new IdentifierRule("Solar", "ELEC", "SOLR")
+            { Match = RuleMatch.Contains });
+
+            FourDName solar = new NameClassifier(custom).Classify("Roof Solar Array");
+            Check("a custom activity classifies", solar.ActivityCode == "SOLR", solar.ActivityCode);
+            Check("a custom activity gets a sequence code",
+                  solar.SequenceCode == SequenceModel.SequenceCode(99, custom.Resolve("SOLR")),
+                  solar.SequenceCode);
+            Check("a custom activity appears in the sequencing table",
+                  custom.AllResolved().Any(a => a.Code == "SOLR"));
+
+            // And a custom definition shadows a built-in of the same code.
+            var shadow = new SequenceProfile();
+            shadow.Identifiers.Activities.Add(new Activity("DECK", "Deck (site convention)", "STRC", 4, 41));
+            Check("a custom definition shadows the built-in",
+                  shadow.Resolve("DECK").LagFloors == 4,
+                  shadow.Resolve("DECK").LagFloors.ToString(CultureInfo.InvariantCulture));
+            Check("shadowing does not duplicate the row",
+                  shadow.AllResolved().Count(a => a.Code == "DECK") == 1);
+
+            // An invalid rule reports why instead of throwing at classify time.
+            var broken = new IdentifierRule("([unclosed", "ARCS", "DRYW") { Match = RuleMatch.Regex };
+            Check("a broken regex is reported", broken.Validate() != null, broken.Validate());
+            var brokenProfile = new SequenceProfile();
+            brokenProfile.Identifiers.Rules.Add(broken);
+            Check("a broken regex does not throw",
+                  new NameClassifier(brokenProfile).Classify("anything") != null);
+        }
+
+        private static void IdentifierLibraryRoundTrip()
+        {
+            var library = new IdentifierLibrary();
+            library.Disciplines.Add(new Discipline("FACD", "Facade", "FACD", "FACADE"));
+            library.Activities.Add(new Activity("SOLR", "Solar array", "ELEC", 10, 97, "SOLAR", "PV"));
+            library.Rules.Add(new IdentifierRule("Solar", "ELEC", "SOLR")
+            { Match = RuleMatch.Contains, Priority = 500, Note = "roof PV" });
+            library.Rules.Add(new IdentifierRule("ZZ", "MISC", "") { Enabled = false });
+
+            var reloaded = new IdentifierLibrary();
+            reloaded.Read(library.Write().Split('\n'));
+
+            Check("library round trip keeps the discipline",
+                  reloaded.Disciplines.Count == 1 && reloaded.Disciplines[0].Code == "FACD");
+            Check("library round trip keeps the activity",
+                  reloaded.Activities.Count == 1 && reloaded.Activities[0].LagFloors == 10 &&
+                  reloaded.Activities[0].CycleOrder == 97);
+            Check("library round trip keeps the aliases",
+                  reloaded.Activities[0].Aliases.Contains("SOLAR") &&
+                  reloaded.Activities[0].Aliases.Contains("PV"));
+            Check("library round trip keeps the rules", reloaded.Rules.Count == 2);
+            Check("library round trip keeps the match mode",
+                  reloaded.Rules[0].Match == RuleMatch.Contains);
+            Check("library round trip keeps the priority", reloaded.Rules[0].Priority == 500);
+            Check("library round trip keeps the note", reloaded.Rules[0].Note == "roof PV");
+            Check("library round trip keeps the disabled flag", !reloaded.Rules[1].Enabled);
+            Check("a clean library reports no warnings", reloaded.Warnings.Count == 0,
+                  string.Join("; ", reloaded.Warnings.ToArray()));
+
+            // A damaged file degrades to what it can read, and says what it lost.
+            var damaged = new IdentifierLibrary();
+            damaged.Read(new[]
+            {
+                "# a comment",
+                "",
+                "rule=Solar|contains|ELEC|SOLR",
+                "this line makes no sense",
+                "activity=ONLYCODE",
+                "rule=|token|ARCS|DRYW"
+            });
+            Check("a damaged file still yields its good rule", damaged.Rules.Count == 1,
+                  damaged.Rules.Count.ToString(CultureInfo.InvariantCulture));
+            Check("a damaged file reports every bad line", damaged.Warnings.Count == 3,
+                  string.Join(" | ", damaged.Warnings.ToArray()));
         }
 
         private static void LevelDetection()
@@ -491,6 +703,49 @@ namespace NavEx
             bool sameEveryTime = even.Count == rerun.Count &&
                 Enumerable.Range(0, even.Count).All(i => even[i].Set == rerun[i].Set && even[i].Task == rerun[i].Task);
             Check("re-running with the same inputs is idempotent", sameEveryTime);
+        }
+
+        /// <summary>
+        /// A task read out of TimeLiner and then edited here has to stay the same
+        /// task on the way back, or the write creates a second one beside the
+        /// original and the user is left reconciling two schedules.
+        ///
+        /// The Navisworks half of that cannot run here, so what is checked is the
+        /// part that decides it: the handle survives an edit, and the stable key —
+        /// the fallback identity — prefers the ID over the name precisely because
+        /// the name is the field most likely to have been edited.
+        /// </summary>
+        private static void EditedTaskIdentity()
+        {
+            var handle = new object();
+            var task = new ScheduleTask
+            {
+                TaskId = "A1000",
+                Name = "L01 Structural Deck Pour",
+                PlannedStart = new DateTime(2026, 3, 2),
+                PlannedFinish = new DateTime(2026, 3, 6),
+                SourceHandle = handle
+            };
+
+            string keyBefore = task.StableKey;
+
+            task.Name = "L01 Deck Pour — east half";
+            task.PlannedFinish = new DateTime(2026, 3, 9);
+            task.DurationDays = null;
+
+            Check("an edited task keeps its source handle", ReferenceEquals(task.SourceHandle, handle));
+            Check("an ID'd task keeps its identity across a rename", task.StableKey == keyBefore, task.StableKey);
+            Check("duration follows the edited dates",
+                  Math.Abs(task.ComputedDurationDays - 7) < 0.01,
+                  task.ComputedDurationDays.ToString("0.##", CultureInfo.InvariantCulture));
+            Check("an edited task is still writable", task.IsValid);
+
+            // Without an ID the name is all there is, which is exactly why the
+            // handle carries the identity instead.
+            var unnamed = new ScheduleTask { Name = "Pour", PlannedStart = DateTime.Today, PlannedFinish = DateTime.Today };
+            string before = unnamed.StableKey;
+            unnamed.Name = "Pour east";
+            Check("without an ID the key follows the name", unnamed.StableKey != before, unnamed.StableKey);
         }
 
         private static MatchTarget Target(string name)
