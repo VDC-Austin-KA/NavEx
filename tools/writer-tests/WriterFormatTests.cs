@@ -123,6 +123,16 @@ namespace NavEx
             return new Vec3(c[0], c[1], c[2]);
         }
 
+        /// <summary>
+        /// The pixmy.* schedule linkage and navex:* provenance that a Datasmith export
+        /// attaches to every actor.
+        ///
+        /// The geometry itself now goes through Epic's Datasmith Export SDK, which
+        /// needs a native bridge DLL and a built SDK, so it cannot run here. What is
+        /// checked is the part that used to be hand-written XML and is still ours to
+        /// get right: every field name Unrealistic4D reads, and the identity rules for
+        /// pixmy.sourceGuid.
+        /// </summary>
         private static void DatasmithContractFields()
         {
             var options = new ExportOptions { OutputFolder = ".", IncludeNormals = true, WeldVertices = false };
@@ -140,23 +150,21 @@ namespace NavEx
             };
 
             // Node A: no real instance GUID (the common case for merge-by-material /
-            // per-model-file grouping) — must synthesise. Set name is already-coded,
+            // per-model-file grouping) -- must synthesise. Set name is already-coded,
             // so FourDName.TryParse resolves the name.* fields.
             const string setNameA = "00840_A_L05_ARCH_FRMG_Interior framing";
             NodeBuilder nodeA = MakeTriangleNode("Level 5 framing", setNameA, options, materials);
             scene.Nodes.Add(nodeA);
 
-            // Node B: carries a real (non-zero) Navisworks instance GUID — must be used
-            // as-is, not synthesised.
+            // Node B: carries a real (non-zero) Navisworks instance GUID -- used as-is.
             const string setNameB = "Miscellaneous Set";
             NodeBuilder nodeB = MakeTriangleNode("A real item", setNameB, options, materials);
             nodeB.Extras["navex:guid"] = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
             scene.Nodes.Add(nodeB);
 
-            // Node C: carries the all-zeroes GUID NavEx's own FBX path is known to
-            // produce for every element in the real sample — must be treated as absent
-            // and synthesised instead of passed through, since that all-zeroes value is
-            // exactly the bug this contract replaces.
+            // Node C: the all-zeroes GUID NavEx's own FBX path produces for every
+            // element in the real sample data -- must be treated as absent and
+            // synthesised, since that value is the bug this contract replaces.
             const string setNameC = "Zero Guid Set";
             NodeBuilder nodeC = MakeTriangleNode("Zero guid item", setNameC, options, materials);
             nodeC.Extras["navex:guid"] = "00000000-0000-0000-0000-000000000000";
@@ -172,86 +180,92 @@ namespace NavEx
             };
             options.DatasmithTaskLinks[setNameA] = task;
 
-            string path = "out_test.udatasmith";
-            ExportResult result = new DatasmithWriter(options).Write(scene, path);
-            string xml = File.ReadAllText(path);
+            var writer = new DatasmithWriter(options);
+            List<KeyValuePair<string, string>> metaA = writer.BuildNodeMetaData(nodeA, 0, scene);
+            List<KeyValuePair<string, string>> metaB = writer.BuildNodeMetaData(nodeB, 1, scene);
+            List<KeyValuePair<string, string>> metaC = writer.BuildNodeMetaData(nodeC, 2, scene);
 
-            Check(".udatasmith file was written", File.Exists(path));
-            Check("payload FBX sidecar was written", result.SidecarFiles.Count == 1 && File.Exists(result.SidecarFiles[0]));
-            Check("Datasmith wrote 3 actors", result.NodeCount == 3, result.NodeCount.ToString(CultureInfo.InvariantCulture));
+            // -- Contract field presence, exact names --
+            Check("pixmy.contractVersion present and = 1.0", Value(metaA, "pixmy.contractVersion") == "1.0");
+            Check("pixmy.sourceGuid present", Has(metaA, "pixmy.sourceGuid"));
+            Check("pixmy.guidSynthetic present", Has(metaA, "pixmy.guidSynthetic"));
+            Check("pixmy.set.name is the selection set", Value(metaA, "pixmy.set.name") == setNameA);
+            Check("pixmy.task.stableKey matches ScheduleTask.StableKey",
+                Value(metaA, "pixmy.task.stableKey") == task.StableKey, Value(metaA, "pixmy.task.stableKey"));
+            Check("pixmy.task.displayName present", Value(metaA, "pixmy.task.displayName") == task.Name);
+            Check("pixmy.task.plannedStart is ISO 8601 with no offset",
+                Value(metaA, "pixmy.task.plannedStart") == "2026-01-15T00:00:00");
+            Check("pixmy.task.plannedFinish is ISO 8601 with no offset",
+                Value(metaA, "pixmy.task.plannedFinish") == "2026-02-01T00:00:00");
+            Check("pixmy.task.type normalises to Construct", Value(metaA, "pixmy.task.type") == "Construct");
+            Check("pixmy.name.sequenceCode present", Value(metaA, "pixmy.name.sequenceCode") == "00840");
+            Check("pixmy.name.zone present", Value(metaA, "pixmy.name.zone") == "A");
+            Check("pixmy.name.level present (canonical form)", Value(metaA, "pixmy.name.level") == "L05");
+            Check("pixmy.name.discipline present", Value(metaA, "pixmy.name.discipline") == "ARCH");
+            Check("pixmy.name.activity present", Value(metaA, "pixmy.name.activity") == "FRMG");
 
-            // ── Contract field presence, exact names, per docs/contracts/schedule-link.md ──
-            Check("pixmy.contractVersion present and = 1.0", xml.Contains("name=\"pixmy.contractVersion\" type=\"String\" val=\"1.0\""));
-            Check("pixmy.sourceGuid present", xml.Contains("name=\"pixmy.sourceGuid\""));
-            Check("pixmy.guidSynthetic present", xml.Contains("name=\"pixmy.guidSynthetic\""));
-            Check("pixmy.set.name present for node A", xml.Contains("val=\"" + setNameA + "\""));
-            Check("pixmy.task.stableKey present and matches ScheduleTask.StableKey", xml.Contains("name=\"pixmy.task.stableKey\" type=\"String\" val=\"" + task.StableKey + "\""));
-            Check("pixmy.task.displayName present", xml.Contains("name=\"pixmy.task.displayName\" type=\"String\" val=\"" + task.Name + "\""));
-            Check("pixmy.task.plannedStart is ISO 8601 with no offset", xml.Contains("name=\"pixmy.task.plannedStart\" type=\"String\" val=\"2026-01-15T00:00:00\""));
-            Check("pixmy.task.plannedFinish is ISO 8601 with no offset", xml.Contains("name=\"pixmy.task.plannedFinish\" type=\"String\" val=\"2026-02-01T00:00:00\""));
-            Check("pixmy.task.type normalises to Construct", xml.Contains("name=\"pixmy.task.type\" type=\"String\" val=\"Construct\""));
-            Check("pixmy.name.sequenceCode present", xml.Contains("name=\"pixmy.name.sequenceCode\" type=\"String\" val=\"00840\""));
-            Check("pixmy.name.zone present", xml.Contains("name=\"pixmy.name.zone\" type=\"String\" val=\"A\""));
-            Check("pixmy.name.level present (canonical form)", xml.Contains("name=\"pixmy.name.level\" type=\"String\" val=\"L05\""));
-            Check("pixmy.name.discipline present", xml.Contains("name=\"pixmy.name.discipline\" type=\"String\" val=\"ARCH\""));
-            Check("pixmy.name.activity present", xml.Contains("name=\"pixmy.name.activity\" type=\"String\" val=\"FRMG\""));
+            // Unscheduled nodes carry no task fields at all -- absence is legal here,
+            // not an error.
+            Check("an unscheduled node emits no pixmy.task.stableKey", !Has(metaB, "pixmy.task.stableKey"));
+            Check("an unscheduled node still carries pixmy.set.name",
+                Value(metaB, "pixmy.set.name") == setNameB);
 
-            // Node B / C are unscheduled: absence of task.* is legal, not an error — only
-            // node A (the one entry in DatasmithTaskLinks) should emit task fields at all.
-            Check("only the scheduled node emits pixmy.task.stableKey (unscheduled nodes are legal, not errors)",
-                CountOccurrences(xml, "name=\"pixmy.task.stableKey\"") == 1);
-
-            // ── Identity rules: never all-zeroes, real GUID passed through, zero GUID replaced ──
-            List<string> guids = ExtractValues(xml, "pixmy.sourceGuid");
-            Check("exactly 3 pixmy.sourceGuid values emitted (one per node)", guids.Count == 3, guids.Count.ToString(CultureInfo.InvariantCulture));
-            bool anyAllZero = false;
-            foreach (string g in guids) if (string.Equals(g, "00000000-0000-0000-0000-000000000000", StringComparison.OrdinalIgnoreCase)) anyAllZero = true;
-            Check("no emitted pixmy.sourceGuid is the all-zeroes GUID", !anyAllZero);
-
-            var guidSet = new HashSet<string>(guids, StringComparer.OrdinalIgnoreCase);
-            Check("all pixmy.sourceGuid values are unique within the export", guidSet.Count == guids.Count);
-
+            // -- Identity rules --
+            Check("node A (no GUID) is synthesised", Value(metaA, "pixmy.guidSynthetic") == "true");
             Check("node B's real instance GUID is carried through verbatim",
-                xml.Contains("val=\"3fa85f64-5717-4562-b3fc-2c963f66afa6\""));
+                Value(metaB, "pixmy.sourceGuid") == "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+            Check("node B is not marked synthetic", Value(metaB, "pixmy.guidSynthetic") == "false");
+            Check("node C's all-zeroes GUID is replaced, not passed through",
+                Value(metaC, "pixmy.sourceGuid") != "00000000-0000-0000-0000-000000000000");
+            Check("node C is marked synthetic", Value(metaC, "pixmy.guidSynthetic") == "true");
 
-            // -- Element naming: the StaticMesh element (which is what Unreal names
-            // the imported asset after) has to come from the selection set, not the
-            // node, or every set in a file-per-set export lands on one asset name. --
-            Check("StaticMesh element is named after the selection set",
-                xml.Contains("<StaticMesh name=\"00840_A_L05_ARCH_FRMG_Interior_framing\">"),
-                FirstLineContaining(xml, "<StaticMesh name="));
-            Check("the FBX payload reference still points at the node name FbxWriter emitted",
-                xml.Contains("object=\"Model::Level_5_framing\""),
-                FirstLineContaining(xml, "object=\"Model::"));
-            Check("actor names stay unique per element",
-                CountOccurrences(xml, "<Actor name=\"actor_") == 3);
+            var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Value(metaA, "pixmy.sourceGuid"),
+                Value(metaB, "pixmy.sourceGuid"),
+                Value(metaC, "pixmy.sourceGuid")
+            };
+            Check("all pixmy.sourceGuid values are unique within the export", guids.Count == 3);
 
-            List<string> syntheticFlags = ExtractValues(xml, "pixmy.guidSynthetic");
-            Check("3 guidSynthetic flags emitted", syntheticFlags.Count == 3, syntheticFlags.Count.ToString(CultureInfo.InvariantCulture));
-            Check("exactly one node (B, the real GUID) is non-synthetic", CountEqual(syntheticFlags, "false") == 1,
-                string.Join(",", syntheticFlags));
-            Check("exactly two nodes (A with no GUID, C with the zero GUID) are synthetic", CountEqual(syntheticFlags, "true") == 2,
-                string.Join(",", syntheticFlags));
-
-            // ── Provenance carried verbatim from GltfWriter's convention ──
-            Check("navex:sourceDocument carried verbatim", xml.Contains("name=\"navex:sourceDocument\" type=\"String\" val=\"site.nwd\""));
-            Check("navex:sourceUnits carried verbatim", xml.Contains("name=\"navex:sourceUnits\" type=\"String\" val=\"Feet\""));
-            Check("navex:targetUnits carried verbatim", xml.Contains("name=\"navex:targetUnits\" type=\"String\" val=\"Meters\""));
-            Check("navex:upAxis carried verbatim", xml.Contains("name=\"navex:upAxis\""));
-            Check("navex:originMode carried verbatim", xml.Contains("name=\"navex:originMode\""));
-            Check("navex:appliedOffset carried verbatim", xml.Contains("name=\"navex:appliedOffset\" type=\"String\" val=\"10,20,30\""));
-            Check("navex:offsetNote carried verbatim, exact string",
-                xml.Contains("val=\"Add appliedOffset to exported coordinates to return to source world coordinates.\""));
-            Check("navex:exportedUtc carried verbatim", xml.Contains("name=\"navex:exportedUtc\""));
-
-            // Re-export of the unchanged scene must reproduce the same synthetic GUIDs
-            // (stability across re-exports is the other identity-rule requirement).
-            string path2 = "out_test2.udatasmith";
-            new DatasmithWriter(options).Write(scene, path2);
-            string xml2 = File.ReadAllText(path2);
-            List<string> guids2 = ExtractValues(xml2, "pixmy.sourceGuid");
+            // Stability across re-exports of an unchanged scene is the other half of
+            // the identity rule.
             Check("synthetic sourceGuid is stable across re-exports of an unchanged scene",
-                guids.Count == guids2.Count && guids[0] == guids2[0] && guids[2] == guids2[2]);
+                writer.BuildNodeMetaData(nodeA, 0, scene).Find(kv => kv.Key == "pixmy.sourceGuid").Value
+                    == Value(metaA, "pixmy.sourceGuid"));
+
+            // -- Provenance, carried verbatim from GltfWriter's convention --
+            Check("navex:sourceDocument carried verbatim", Value(metaA, "navex:sourceDocument") == "site.nwd");
+            Check("navex:sourceUnits carried verbatim", Value(metaA, "navex:sourceUnits") == "Feet");
+            Check("navex:targetUnits carried verbatim", Value(metaA, "navex:targetUnits") == "Meters");
+            Check("navex:upAxis carried verbatim", Has(metaA, "navex:upAxis"));
+            Check("navex:originMode carried verbatim", Has(metaA, "navex:originMode"));
+            Check("navex:appliedOffset carried verbatim", Value(metaA, "navex:appliedOffset") == "10,20,30");
+            Check("navex:offsetNote carried verbatim, exact string",
+                Value(metaA, "navex:offsetNote")
+                    == "Add appliedOffset to exported coordinates to return to source world coordinates.");
+            Check("navex:exportedUtc carried verbatim", Has(metaA, "navex:exportedUtc"));
+
+            // -- Element naming: what Unreal names the imported StaticMesh asset. It
+            // has to come from the selection set, not the node, or every set in a
+            // file-per-set export lands on one asset name. --
+            Check("StaticMesh element is named after the selection set",
+                DatasmithWriter.ElementName(nodeA, 0) == "00840_A_L05_ARCH_FRMG_Interior_framing",
+                DatasmithWriter.ElementName(nodeA, 0));
+            Check("a second node in the same scene gets a unique element name",
+                DatasmithWriter.ElementName(nodeB, 1) == "Miscellaneous_Set_1",
+                DatasmithWriter.ElementName(nodeB, 1));
+        }
+
+        private static string Value(List<KeyValuePair<string, string>> meta, string key)
+        {
+            foreach (KeyValuePair<string, string> kv in meta)
+                if (kv.Key == key) return kv.Value;
+            return null;
+        }
+
+        private static bool Has(List<KeyValuePair<string, string>> meta, string key)
+        {
+            return Value(meta, key) != null;
         }
 
         /// <summary>

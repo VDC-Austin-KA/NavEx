@@ -31,3 +31,6 @@ tools/typecheck/bin/
 tools/writer-tests/obj/
 tools/writer-tests/bin/
 artifacts/
+
+# Epic UE source pulled down as reference; not redistributable in this repo.
+native/sample/

@@ -9,20 +9,22 @@ using NavEx.FourD;
 namespace NavEx.Core.Exporters
 {
     /// <summary>
-    /// Writes a <see cref="SceneData"/> as a .udatasmith file — XML plus a payload
-    /// folder, written directly with no Datasmith SDK, same reasoning as
-    /// <see cref="GltfWriter"/> and <see cref="FbxWriter"/>.
+    /// Writes a <see cref="SceneData"/> as a real Datasmith scene, through Epic's
+    /// Datasmith Export SDK via <see cref="DatasmithNative"/>.
     ///
-    /// This is the seam that replaces the FBX + JSON-sidecar Unreal workflow. Every
-    /// exported node carries its `pixmy.*` schedule-linkage metadata inline, per the
-    /// contract at Convergence/docs/contracts/schedule-link.md — Unrealistic4D reads
-    /// this file directly, field names and all. Do not rename or invent fields here
-    /// without updating that document; it is the single source of truth for both
-    /// repos.
+    /// This replaces a hand-written `.udatasmith` that pointed its mesh payload at an
+    /// FBX. Nothing could import those: Datasmith reads only its own binary
+    /// `.udsmesh`, and handed an FBX the loader reads a garbage element count and
+    /// loops on read-past-EOF, which is why a full-model import produced a multi-GB
+    /// log and took the editor down rather than failing. The XML was wrong in
+    /// several other ways besides — format version, lowercase `file` element,
+    /// `label` attribute, required `Size`/`Hash`/`Material` children — so none of it
+    /// survived; the SDK owns the whole format now.
     ///
-    /// Geometry payload is delegated to <see cref="FbxWriter"/> (one combined FBX
-    /// sitting in a sibling "_Assets" folder, Datasmith's usual convention) — the
-    /// scene graph is not duplicated, only referenced by the same node names.
+    /// What did survive is the contract that matters downstream: one scene per
+    /// Navisworks selection set, and every `pixmy.*` key spelled exactly as before.
+    /// `pixmy.set.name` is what Unrealistic4D joins schedule tasks on, and
+    /// <see cref="ScheduleJsonWriter"/> emits the same value.
     /// </summary>
     internal class DatasmithWriter
     {
@@ -37,71 +39,166 @@ namespace NavEx.Core.Exporters
 
         public ExportResult Write(SceneData scene, string outputPath)
         {
+            if (!DatasmithNative.Available)
+                throw new InvalidOperationException(
+                    "Datasmith export needs the native SDK bridge. " + DatasmithNative.UnavailableReason);
+
+            DatasmithNative.EnsureInitialized();
+
             var result = new ExportResult
             {
                 FilePath = outputPath,
                 TriangleCount = scene.TriangleCount,
                 VertexCount = scene.VertexCount,
+                // No material elements are created yet, matching what the previous
+                // writer produced. Face material ids are carried no further than the
+                // mesh, so nothing references a material that does not exist.
                 MaterialCount = 0
             };
 
-            string assetsDirName = Path.GetFileNameWithoutExtension(outputPath) + "_Assets";
-            string assetsDir = Path.Combine(Path.GetDirectoryName(outputPath) ?? "", assetsDirName);
-            Directory.CreateDirectory(assetsDir);
-            string fbxPath = Path.Combine(assetsDir, "geometry.fbx");
-            ExportResult payload = new FbxWriter(_options).Write(scene, fbxPath);
-            result.SidecarFiles.Add(fbxPath);
+            string sceneName = Path.GetFileNameWithoutExtension(outputPath);
+            string outputDir = Path.GetDirectoryName(outputPath) ?? "";
 
-            var invariant = CultureInfo.InvariantCulture;
-            var sb = new StringBuilder();
+            IntPtr handle = DatasmithNative.NavExDs_BeginScene(
+                sceneName, outputDir,
+                "NavEx", "NavEx", "NavEx Navisworks Exporter", PluginInfo.Version);
 
-            sb.Append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
-            sb.Append("<DatasmithUnrealScene>\n");
-            sb.Append("\t<Version>1.0</Version>\n");
-            sb.Append("\t<SDKVersion>0.0</SDKVersion>\n");
-            sb.Append("\t<Host>NavEx</Host>\n");
-            sb.Append("\t<Application Name=\"NavEx\" Vendor=\"NavEx\" ProductName=\"NavEx Navisworks Exporter\" ProductVersion=\"")
-              .Append(Xml(PluginInfo.Version)).Append("\"/>\n");
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException(
+                    "Datasmith could not start a scene for '" + sceneName + "': " + DatasmithNative.LastError());
 
-            WriteProvenance(sb, scene, invariant);
-
-            int index = 0;
-            foreach (NodeBuilder node in scene.NonEmptyNodes)
+            try
             {
-                // Two different names, deliberately. The payload reference has to be
-                // the name FbxWriter actually emitted; the Datasmith element name is
-                // what Unreal names the imported StaticMesh asset after, so it is
-                // derived from the selection set instead. Without that, every set in a
-                // file-per-set export imports as an asset with the same name (the real
-                // exports are 179 of "model") and nothing downstream can tell them
-                // apart by name.
-                string payloadName = FbxWriter.SanitizeName(node.Name, "node_" + index);
-                string meshName = ElementName(node, index);
-                string actorName = "actor_" + meshName;
+                int index = 0;
+                foreach (NodeBuilder node in scene.NonEmptyNodes)
+                {
+                    string meshName = ElementName(node, index);
+                    string actorName = "actor_" + meshName;
 
-                sb.Append("\t<StaticMesh name=\"").Append(Xml(meshName)).Append("\">\n");
-                sb.Append("\t\t<Label value=\"").Append(Xml(meshName)).Append("\"/>\n");
-                sb.Append("\t\t<File path=\"").Append(Xml(assetsDirName + "/geometry.fbx")).Append("\" object=\"")
-                  .Append(Xml("Model::" + payloadName)).Append("\"/>\n");
-                sb.Append("\t</StaticMesh>\n");
+                    if (WriteNode(handle, node, meshName, actorName, index, scene))
+                        result.NodeCount++;
 
-                sb.Append("\t<Actor name=\"").Append(Xml(actorName)).Append("\" type=\"StaticMeshActor\" layer=\"NavEx\">\n");
-                sb.Append("\t\t<Label value=\"").Append(Xml(meshName)).Append("\"/>\n");
-                sb.Append("\t\t<mesh name=\"").Append(Xml(meshName)).Append("\"/>\n");
-                WriteNodeMetaData(sb, actorName, node, index, scene);
-                sb.Append("\t</Actor>\n");
+                    index++;
+                }
 
-                index++;
-                result.NodeCount++;
+                if (result.NodeCount == 0)
+                    throw new InvalidOperationException(
+                        "'" + sceneName + "' produced no triangles that Datasmith could accept.");
+
+                if (DatasmithNative.NavExDs_Export(handle) != 0)
+                    throw new InvalidOperationException(
+                        "Datasmith export of '" + sceneName + "' failed: " + DatasmithNative.LastError());
+            }
+            finally
+            {
+                DatasmithNative.NavExDs_DestroyScene(handle);
             }
 
-            sb.Append("</DatasmithUnrealScene>\n");
+            result.FileSizeBytes = SizeOf(outputPath);
 
-            File.WriteAllText(outputPath, sb.ToString(), new UTF8Encoding(false));
+            // The SDK writes the mesh payloads into a sibling `_Assets` folder. Report
+            // them so the export summary accounts for the bytes actually produced.
+            string assetsDir = Path.Combine(outputDir, sceneName + "_Assets");
+            if (Directory.Exists(assetsDir))
+            {
+                foreach (string payload in Directory.GetFiles(assetsDir))
+                {
+                    result.SidecarFiles.Add(payload);
+                    result.FileSizeBytes += SizeOf(payload);
+                }
+            }
 
-            result.FileSizeBytes = new FileInfo(outputPath).Length;
-            result.FileSizeBytes += payload.FileSizeBytes;
             return result;
+        }
+
+        /// <summary>
+        /// Flattens one node's buckets into the single mesh Datasmith wants, places an
+        /// actor for it and attaches the schedule linkage. Returns false when the node
+        /// held no triangles (line-only geometry, for instance).
+        /// </summary>
+        private bool WriteNode(IntPtr handle, NodeBuilder node, string meshName, string actorName,
+                               int index, SceneData scene)
+        {
+            var positions = new List<float>();
+            var normals = new List<float>();
+            var indices = new List<int>();
+            bool allHaveNormals = true;
+
+            foreach (PrimitiveBucket bucket in node.Buckets.Values)
+            {
+                // Datasmith meshes are triangles. Line primitives have no
+                // representation here and are simply not exported.
+                if (bucket.Mode != PrimitiveMode.Triangles) continue;
+
+                foreach (MeshBuilder builder in bucket.Builders)
+                {
+                    if (builder.IsEmpty) continue;
+
+                    // Builders are split at the vertex cap, so each one restarts its
+                    // indices at zero and has to be rebased as it is appended.
+                    int baseVertex = positions.Count / 3;
+
+                    foreach (float value in builder.Positions) positions.Add(value);
+
+                    if (builder.HasNormals && builder.Normals.Count == builder.Positions.Count)
+                    {
+                        foreach (float value in builder.Normals) normals.Add(value);
+                    }
+                    else
+                    {
+                        allHaveNormals = false;
+                    }
+
+                    foreach (uint i in builder.Indices) indices.Add(baseVertex + (int)i);
+                }
+            }
+
+            if (indices.Count < 3) return false;
+
+            // Partial normals cannot be handed over: the array has to line up with the
+            // vertices or every face after the gap is shaded from the wrong data. All
+            // or nothing, and Datasmith computes them when they are absent.
+            float[] normalArray = allHaveNormals && normals.Count == positions.Count
+                ? normals.ToArray()
+                : null;
+
+            if (DatasmithNative.NavExDs_AddMesh(
+                    handle, meshName,
+                    positions.ToArray(), positions.Count / 3,
+                    indices.ToArray(), indices.Count / 3,
+                    normalArray,
+                    null,   // NavEx generates no UVs; the SDK builds lightmap UVs itself
+                    null) != 0)
+            {
+                throw new InvalidOperationException(
+                    "Datasmith rejected mesh '" + meshName + "': " + DatasmithNative.LastError());
+            }
+
+            if (DatasmithNative.NavExDs_AddMeshActor(handle, actorName, meshName, meshName, "NavEx") != 0)
+            {
+                throw new InvalidOperationException(
+                    "Datasmith rejected actor '" + actorName + "': " + DatasmithNative.LastError());
+            }
+
+            List<KeyValuePair<string, string>> meta = BuildNodeMetaData(node, index, scene);
+            if (meta.Count > 0)
+            {
+                var keys = new string[meta.Count];
+                var values = new string[meta.Count];
+                for (int i = 0; i < meta.Count; i++)
+                {
+                    keys[i] = meta[i].Key;
+                    values[i] = meta[i].Value;
+                }
+
+                if (DatasmithNative.NavExDs_AddMetaData(handle, actorName, keys, values, meta.Count) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "Datasmith rejected metadata for '" + actorName + "': " + DatasmithNative.LastError());
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -113,7 +210,7 @@ namespace NavEx.Core.Exporters
         /// index when one file holds several nodes, since Datasmith element names have
         /// to be unique within a scene.
         /// </summary>
-        private static string ElementName(NodeBuilder node, int index)
+        internal static string ElementName(NodeBuilder node, int index)
         {
             string setName;
             node.Extras.TryGetValue("navex:set", out setName);
@@ -123,44 +220,32 @@ namespace NavEx.Core.Exporters
         }
 
         /// <summary>
-        /// The provenance block GltfWriter.BuildProvenance already established, carried
-        /// across verbatim (same navex: keys) per the schedule-link contract — this is a
-        /// NavEx-authored top-level element, not part of the official Datasmith schema,
-        /// since the schema has no scene-wide free-form metadata container.
+        /// The `pixmy.*` schedule linkage plus the `navex:*` provenance, as key/value
+        /// pairs for the SDK's metadata element.
+        ///
+        /// Provenance used to be its own top-level XML element, which is not something
+        /// the SDK's schema has a place for, so it rides along per actor instead. The
+        /// values and their spellings are unchanged either way — Unrealistic4D reads
+        /// them by name.
         /// </summary>
-        private void WriteProvenance(StringBuilder sb, SceneData scene, CultureInfo invariant)
+        internal List<KeyValuePair<string, string>> BuildNodeMetaData(NodeBuilder node, int index, SceneData scene)
         {
-            sb.Append("\t<NavExProvenance>\n");
-            AppendProperty(sb, "navex:sourceDocument", scene.SourceDocument ?? "");
-            AppendProperty(sb, "navex:sourceUnits", scene.SourceUnits ?? "");
-            AppendProperty(sb, "navex:targetUnits", scene.TargetUnits ?? "");
-            AppendProperty(sb, "navex:upAxis", scene.YUpApplied ? "Y (converted from Z-up)" : "Z (unchanged)");
-            AppendProperty(sb, "navex:originMode", _options.Origin.ToString());
-            AppendProperty(sb, "navex:appliedOffset", string.Format(invariant, "{0},{1},{2}",
-                scene.AppliedOffset.X, scene.AppliedOffset.Y, scene.AppliedOffset.Z));
-            AppendProperty(sb, "navex:offsetNote",
-                "Add appliedOffset to exported coordinates to return to source world coordinates.");
-            AppendProperty(sb, "navex:exportedUtc", DateTime.UtcNow.ToString("o", invariant));
-            sb.Append("\t</NavExProvenance>\n");
-        }
+            var invariant = CultureInfo.InvariantCulture;
+            var meta = new List<KeyValuePair<string, string>>();
 
-        private void WriteNodeMetaData(StringBuilder sb, string actorName, NodeBuilder node, int index, SceneData scene)
-        {
             string setName;
             node.Extras.TryGetValue("navex:set", out setName);
             setName = setName ?? "";
 
-            sb.Append("\t\t<MetaData element=\"").Append(Xml(actorName)).Append("\">\n");
-
-            AppendProperty(sb, "pixmy.contractVersion", ContractVersion);
+            Add(meta, "pixmy.contractVersion", ContractVersion);
 
             string guid;
             bool synthetic;
             ResolveSourceGuid(node, index, scene, out guid, out synthetic);
-            AppendProperty(sb, "pixmy.sourceGuid", guid);
-            AppendProperty(sb, "pixmy.guidSynthetic", synthetic ? "true" : "false");
+            Add(meta, "pixmy.sourceGuid", guid);
+            Add(meta, "pixmy.guidSynthetic", synthetic ? "true" : "false");
 
-            AppendProperty(sb, "pixmy.set.name", setName);
+            Add(meta, "pixmy.set.name", setName);
 
             ScheduleTask task = null;
             if (_options.DatasmithTaskLinks != null && setName.Length > 0)
@@ -168,26 +253,37 @@ namespace NavEx.Core.Exporters
 
             if (task != null)
             {
-                AppendProperty(sb, "pixmy.task.stableKey", task.StableKey);
-                AppendPropertyIfPresent(sb, "pixmy.task.displayName", task.Name);
-                AppendDateIfPresent(sb, "pixmy.task.plannedStart", task.PlannedStart);
-                AppendDateIfPresent(sb, "pixmy.task.plannedFinish", task.PlannedFinish);
-                AppendDateIfPresent(sb, "pixmy.task.actualStart", task.ActualStart);
-                AppendDateIfPresent(sb, "pixmy.task.actualFinish", task.ActualFinish);
-                AppendProperty(sb, "pixmy.task.type", task.NormalizedTaskType());
+                Add(meta, "pixmy.task.stableKey", task.StableKey);
+                AddIfPresent(meta, "pixmy.task.displayName", task.Name);
+                AddDateIfPresent(meta, "pixmy.task.plannedStart", task.PlannedStart);
+                AddDateIfPresent(meta, "pixmy.task.plannedFinish", task.PlannedFinish);
+                AddDateIfPresent(meta, "pixmy.task.actualStart", task.ActualStart);
+                AddDateIfPresent(meta, "pixmy.task.actualFinish", task.ActualFinish);
+                Add(meta, "pixmy.task.type", task.NormalizedTaskType());
             }
 
             FourDName parsed = FourDName.TryParse(setName);
             if (parsed != null)
             {
-                AppendPropertyIfPresent(sb, "pixmy.name.sequenceCode", parsed.SequenceCode);
-                AppendPropertyIfPresent(sb, "pixmy.name.zone", parsed.Zone);
-                AppendPropertyIfPresent(sb, "pixmy.name.level", parsed.LevelTag);
-                AppendPropertyIfPresent(sb, "pixmy.name.discipline", parsed.DisciplineCode);
-                AppendPropertyIfPresent(sb, "pixmy.name.activity", parsed.ActivityCode);
+                AddIfPresent(meta, "pixmy.name.sequenceCode", parsed.SequenceCode);
+                AddIfPresent(meta, "pixmy.name.zone", parsed.Zone);
+                AddIfPresent(meta, "pixmy.name.level", parsed.LevelTag);
+                AddIfPresent(meta, "pixmy.name.discipline", parsed.DisciplineCode);
+                AddIfPresent(meta, "pixmy.name.activity", parsed.ActivityCode);
             }
 
-            sb.Append("\t\t</MetaData>\n");
+            Add(meta, "navex:sourceDocument", scene.SourceDocument ?? "");
+            Add(meta, "navex:sourceUnits", scene.SourceUnits ?? "");
+            Add(meta, "navex:targetUnits", scene.TargetUnits ?? "");
+            Add(meta, "navex:upAxis", scene.YUpApplied ? "Y (converted from Z-up)" : "Z (unchanged)");
+            Add(meta, "navex:originMode", _options.Origin.ToString());
+            Add(meta, "navex:appliedOffset", string.Format(invariant, "{0},{1},{2}",
+                scene.AppliedOffset.X, scene.AppliedOffset.Y, scene.AppliedOffset.Z));
+            Add(meta, "navex:offsetNote",
+                "Add appliedOffset to exported coordinates to return to source world coordinates.");
+            Add(meta, "navex:exportedUtc", DateTime.UtcNow.ToString("o", invariant));
+
+            return meta;
         }
 
         /// <summary>
@@ -242,42 +338,34 @@ namespace NavEx.Core.Exporters
             }
         }
 
-        private static void AppendProperty(StringBuilder sb, string name, string value)
+        private static long SizeOf(string path)
         {
-            sb.Append("\t\t\t<KeyValueProperty name=\"").Append(Xml(name)).Append("\" type=\"String\" val=\"")
-              .Append(Xml(value ?? "")).Append("\"/>\n");
+            try
+            {
+                return File.Exists(path) ? new FileInfo(path).Length : 0;
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
         }
 
-        private static void AppendPropertyIfPresent(StringBuilder sb, string name, string value)
+        private static void Add(List<KeyValuePair<string, string>> meta, string name, string value)
+        {
+            meta.Add(new KeyValuePair<string, string>(name, value ?? ""));
+        }
+
+        private static void AddIfPresent(List<KeyValuePair<string, string>> meta, string name, string value)
         {
             if (string.IsNullOrEmpty(value)) return;
-            AppendProperty(sb, name, value);
+            Add(meta, name, value);
         }
 
-        private static void AppendDateIfPresent(StringBuilder sb, string name, DateTime? value)
+        private static void AddDateIfPresent(List<KeyValuePair<string, string>> meta, string name, DateTime? value)
         {
             if (!value.HasValue) return;
             // ISO 8601, no time zone offset — the schedule-link contract is explicit about this.
-            AppendProperty(sb, name, value.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture));
-        }
-
-        private static string Xml(string value)
-        {
-            if (string.IsNullOrEmpty(value)) return "";
-            var sb = new StringBuilder(value.Length);
-            foreach (char c in value)
-            {
-                switch (c)
-                {
-                    case '&': sb.Append("&amp;"); break;
-                    case '<': sb.Append("&lt;"); break;
-                    case '>': sb.Append("&gt;"); break;
-                    case '"': sb.Append("&quot;"); break;
-                    case '\'': sb.Append("&apos;"); break;
-                    default: sb.Append(c); break;
-                }
-            }
-            return sb.ToString();
+            Add(meta, name, value.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture));
         }
     }
 }
