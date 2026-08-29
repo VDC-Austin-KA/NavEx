@@ -285,6 +285,9 @@ namespace NavEx
             if (document == null) return;
 
             ReadOptionsFromUi();
+            // Always the state of the 4D tab as it stands right now, not as it stood
+            // when the tab was last opened.
+            SyncDatasmithTaskLinks();
 
             List<ExportPart> parts = SelectionSetTree.ResolveCheckedParts(document, _allNodes);
             if (parts.Count == 0)
@@ -323,6 +326,9 @@ namespace NavEx
                 "{0} file(s) written, {1} failed, {2:N0} triangles, {3:0.#} s",
                 summary.SucceededCount, summary.FailedCount, summary.TotalTriangles,
                 summary.Elapsed.TotalSeconds));
+
+            if (summary.SchedulePath != null)
+                sb.AppendLine("  ✓ " + Path.GetFileName(summary.SchedulePath) + "  (4D schedule)");
 
             foreach (ExportResult result in summary.Results)
             {

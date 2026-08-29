@@ -20,6 +20,8 @@ namespace NavEx.Core
         public readonly List<ExportResult> Results = new List<ExportResult>();
         public bool Cancelled;
         public TimeSpan Elapsed;
+        /// <summary>The 4D schedule sidecar a Datasmith export wrote, or null.</summary>
+        public string SchedulePath;
 
         public int SucceededCount
         {
@@ -128,8 +130,40 @@ namespace NavEx.Core
                 Log.Error("Export failed", ex);
             }
 
+            // A .udatasmith carries geometry, materials and the per-node pixmy.* linkage
+            // but no tasks and no dates. The schedule therefore rides alongside as JSON:
+            // that sidecar is what lets Unrealistic4D date the tasks and assign the
+            // imported geometry to them without a separate TimeLiner export.
+            if (_options.Format == ExportFormat.Datasmith && !summary.Cancelled)
+                WriteScheduleSidecar(document, summary);
+
             summary.Elapsed = DateTime.UtcNow - started;
             return summary;
+        }
+
+        private void WriteScheduleSidecar(Document document, ExportSummary summary)
+        {
+            try
+            {
+                summary.SchedulePath = ScheduleJsonWriter.Write(
+                    _options,
+                    document == null ? "" : document.Title,
+                    summary.Results,
+                    _options.OutputFolder);
+
+                if (summary.SchedulePath != null)
+                    Log.Success("Schedule -> " + Path.GetFileName(summary.SchedulePath));
+                else
+                    Log.Info("None of the exported sets is matched to a schedule task, so no " +
+                             ScheduleJsonWriter.FileName + " was written. Import and match a " +
+                             "schedule on the 4D tab to date the model in Unreal.");
+            }
+            catch (Exception ex)
+            {
+                // The geometry is already on disk and still usable; losing the sidecar
+                // must not turn a finished export into a failed one.
+                Log.Error("Could not write " + ScheduleJsonWriter.FileName, ex);
+            }
         }
 
         private ExportResult ExportScene(

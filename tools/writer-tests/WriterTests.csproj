@@ -41,5 +41,6 @@
     <Compile Include="../../NavEx/Core/Exporters/ObjWriter.cs" />
     <Compile Include="../../NavEx/Core/Exporters/FbxWriter.cs" />
     <Compile Include="../../NavEx/Core/Exporters/DatasmithWriter.cs" />
+    <Compile Include="../../NavEx/Core/Exporters/ScheduleJsonWriter.cs" />
   </ItemGroup>
 </Project>

@@ -68,18 +68,25 @@ namespace NavEx.Core.Exporters
             int index = 0;
             foreach (NodeBuilder node in scene.NonEmptyNodes)
             {
-                string safeName = FbxWriter.SanitizeName(node.Name, "node_" + index);
-                string meshName = "mesh_" + safeName;
-                string actorName = "actor_" + safeName;
+                // Two different names, deliberately. The payload reference has to be
+                // the name FbxWriter actually emitted; the Datasmith element name is
+                // what Unreal names the imported StaticMesh asset after, so it is
+                // derived from the selection set instead. Without that, every set in a
+                // file-per-set export imports as an asset with the same name (the real
+                // exports are 179 of "model") and nothing downstream can tell them
+                // apart by name.
+                string payloadName = FbxWriter.SanitizeName(node.Name, "node_" + index);
+                string meshName = ElementName(node, index);
+                string actorName = "actor_" + meshName;
 
                 sb.Append("\t<StaticMesh name=\"").Append(Xml(meshName)).Append("\">\n");
-                sb.Append("\t\t<Label value=\"").Append(Xml(node.Name)).Append("\"/>\n");
+                sb.Append("\t\t<Label value=\"").Append(Xml(meshName)).Append("\"/>\n");
                 sb.Append("\t\t<File path=\"").Append(Xml(assetsDirName + "/geometry.fbx")).Append("\" object=\"")
-                  .Append(Xml("Model::" + safeName)).Append("\"/>\n");
+                  .Append(Xml("Model::" + payloadName)).Append("\"/>\n");
                 sb.Append("\t</StaticMesh>\n");
 
                 sb.Append("\t<Actor name=\"").Append(Xml(actorName)).Append("\" type=\"StaticMeshActor\" layer=\"NavEx\">\n");
-                sb.Append("\t\t<Label value=\"").Append(Xml(node.Name)).Append("\"/>\n");
+                sb.Append("\t\t<Label value=\"").Append(Xml(meshName)).Append("\"/>\n");
                 sb.Append("\t\t<mesh name=\"").Append(Xml(meshName)).Append("\"/>\n");
                 WriteNodeMetaData(sb, actorName, node, index, scene);
                 sb.Append("\t</Actor>\n");
@@ -95,6 +102,24 @@ namespace NavEx.Core.Exporters
             result.FileSizeBytes = new FileInfo(outputPath).Length;
             result.FileSizeBytes += payload.FileSizeBytes;
             return result;
+        }
+
+        /// <summary>
+        /// The name Unreal will end up calling this node's StaticMesh asset. Prefers
+        /// the selection set: that is the schedule's granularity, the value of
+        /// pixmy.set.name, and the folder the Datasmith import drops the asset into, so
+        /// an asset named after it resolves by exact path on the Unreal side. Falls
+        /// back to the node name when the node came from no named set, and suffixes the
+        /// index when one file holds several nodes, since Datasmith element names have
+        /// to be unique within a scene.
+        /// </summary>
+        private static string ElementName(NodeBuilder node, int index)
+        {
+            string setName;
+            node.Extras.TryGetValue("navex:set", out setName);
+            string basis = string.IsNullOrEmpty(setName) ? node.Name : setName;
+            string safe = FbxWriter.SanitizeName(basis, "node_" + index);
+            return index == 0 ? safe : safe + "_" + index.ToString(CultureInfo.InvariantCulture);
         }
 
         /// <summary>

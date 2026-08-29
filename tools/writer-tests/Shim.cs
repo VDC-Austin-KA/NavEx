@@ -24,4 +24,4 @@ namespace Autodesk.Navisworks.Api.Interop.ComApi
         double transparency { get; }
     }
 }
-namespace NavEx.Core { public static class PluginInfo { public const string Version = "1.0.0-test"; } }
+namespace NavEx.Core { public static class PluginInfo { public const string Name = "NavEx"; public const string Version = "1.0.0-test"; } }

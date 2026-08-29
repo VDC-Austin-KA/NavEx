@@ -317,6 +317,36 @@ namespace NavEx
             }
         }
 
+        /// <summary>
+        /// Hands the export layer the task-to-set decisions this tab currently holds.
+        ///
+        /// This is the whole connection between the 4D tab and a Datasmith export: with
+        /// it, every exported node carries its pixmy.task.* linkage and the export
+        /// writes the schedule JSON sidecar Unrealistic4D reads to date the model.
+        /// Without it the geometry still exports, just undated. Called immediately
+        /// before the export runs so what ships is the latest state of the tab, not
+        /// whatever was matched when it was last opened.
+        /// </summary>
+        private void SyncDatasmithTaskLinks()
+        {
+            _options.DatasmithTaskLinks.Clear();
+
+            foreach (TaskMatch match in _matches)
+            {
+                if (!match.IsAttached || match.Task == null || !match.Task.IsValid) continue;
+
+                string setName = match.Target.SetName;
+                if (string.IsNullOrEmpty(setName)) continue;
+
+                // A set attached to several tasks keeps the earliest — the task that
+                // actually builds it, rather than a later one that touches it again.
+                ScheduleTask existing;
+                if (_options.DatasmithTaskLinks.TryGetValue(setName, out existing) &&
+                    existing.PlannedStart <= match.Task.PlannedStart) continue;
+                _options.DatasmithTaskLinks[setName] = match.Task;
+            }
+        }
+
         private void OnGanttZoomChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!_fourDReady || Gantt == null) return;

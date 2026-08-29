@@ -34,6 +34,7 @@ namespace NavEx
 
             FbxStructuralInvariants();
             DatasmithContractFields();
+            ScheduleSidecarShape();
 
             Console.WriteLine();
             Console.WriteLine(_failures == 0
@@ -213,6 +214,18 @@ namespace NavEx
             Check("node B's real instance GUID is carried through verbatim",
                 xml.Contains("val=\"3fa85f64-5717-4562-b3fc-2c963f66afa6\""));
 
+            // -- Element naming: the StaticMesh element (which is what Unreal names
+            // the imported asset after) has to come from the selection set, not the
+            // node, or every set in a file-per-set export lands on one asset name. --
+            Check("StaticMesh element is named after the selection set",
+                xml.Contains("<StaticMesh name=\"00840_A_L05_ARCH_FRMG_Interior_framing\">"),
+                FirstLineContaining(xml, "<StaticMesh name="));
+            Check("the FBX payload reference still points at the node name FbxWriter emitted",
+                xml.Contains("object=\"Model::Level_5_framing\""),
+                FirstLineContaining(xml, "object=\"Model::"));
+            Check("actor names stay unique per element",
+                CountOccurrences(xml, "<Actor name=\"actor_") == 3);
+
             List<string> syntheticFlags = ExtractValues(xml, "pixmy.guidSynthetic");
             Check("3 guidSynthetic flags emitted", syntheticFlags.Count == 3, syntheticFlags.Count.ToString(CultureInfo.InvariantCulture));
             Check("exactly one node (B, the real GUID) is non-synthetic", CountEqual(syntheticFlags, "false") == 1,
@@ -239,6 +252,92 @@ namespace NavEx
             List<string> guids2 = ExtractValues(xml2, "pixmy.sourceGuid");
             Check("synthetic sourceGuid is stable across re-exports of an unchanged scene",
                 guids.Count == guids2.Count && guids[0] == guids2[0] && guids[2] == guids2[2]);
+        }
+
+        /// <summary>
+        /// The schedule sidecar a Datasmith export drops beside the .udatasmith files.
+        /// Unrealistic4D reads scheduleStart / tasks[id,name,plannedStart,plannedEnd] /
+        /// elements[taskId,name] literally, so those spellings are the contract; the
+        /// rest of the document is additive.
+        /// </summary>
+        private static void ScheduleSidecarShape()
+        {
+            var options = new ExportOptions { Format = ExportFormat.Datasmith };
+
+            var foundations = new ScheduleTask
+            {
+                TaskId = "A1000",
+                Name = "Level 1 foundations",
+                TaskType = "Construction",
+                PlannedStart = new DateTime(2026, 3, 2),
+                PlannedFinish = new DateTime(2026, 3, 9)
+            };
+            var columns = new ScheduleTask
+            {
+                TaskId = "A1010",
+                Name = "Level 1 columns",
+                TaskType = "Demolition",
+                PlannedStart = new DateTime(2026, 3, 10),
+                PlannedFinish = new DateTime(2026, 3, 20)
+            };
+            options.DatasmithTaskLinks["02120_L01_STRC_FOUN"] = foundations;
+            options.DatasmithTaskLinks["02130_L01_STRC_COLS"] = columns;
+
+            var results = new List<ExportResult>
+            {
+                new ExportResult { SetName = "02120_L01_STRC_FOUN", FilePath = "out/doc 02120_L01_STRC_FOUN.udatasmith" },
+                new ExportResult { SetName = "02130_L01_STRC_COLS", FilePath = "out/doc 02130_L01_STRC_COLS.udatasmith" },
+                new ExportResult { SetName = "Unscheduled Set", FilePath = "out/doc Unscheduled Set.udatasmith" },
+                new ExportResult { SetName = "02120_L01_STRC_FOUN", FilePath = "out/doc failed.udatasmith",
+                                   Failed = true, FailureReason = "no geometry found" }
+            };
+
+            string json = ScheduleJsonWriter.Build(options, "TEST.nwf", results);
+            Check("a schedule sidecar is produced when sets are matched to tasks", json != null);
+            if (json == null) return;
+
+            // -- The names Unrealistic4D looks up literally --
+            Check("scheduleStart is the earliest planned start, date-only",
+                json.Contains("\"scheduleStart\":\"2026-03-02\""), json);
+            Check("tasks[].id is the ScheduleTask stable key",
+                json.Contains("\"id\":\"" + foundations.StableKey + "\""));
+            Check("tasks[].name is the schedule task name",
+                json.Contains("\"name\":\"Level 1 foundations\""));
+            Check("tasks[].plannedStart is ISO 8601 with no offset",
+                json.Contains("\"plannedStart\":\"2026-03-02T00:00:00\""));
+            Check("tasks[].plannedEnd is ISO 8601 with no offset",
+                json.Contains("\"plannedEnd\":\"2026-03-09T00:00:00\""));
+            Check("elements[].taskId points back at a task id",
+                json.Contains("\"taskId\":\"" + foundations.StableKey + "\""));
+
+            // -- The join keys: the asset name for the stem path, pixmy.set.name for
+            // the Datasmith-folder path. Same string, both spellings, one file. --
+            Check("elements[].name is the selection set (= the imported asset name)",
+                json.Contains("\"name\":\"02120_L01_STRC_FOUN\",\"set\":\"02120_L01_STRC_FOUN\""));
+            Check("the metadata key to link on is stated in the document",
+                json.Contains("\"joinKey\":\"pixmy.set.name\""));
+            Check("elements[].file names the .udatasmith the set was written to",
+                json.Contains("\"file\":\"doc 02120_L01_STRC_FOUN.udatasmith\""));
+
+            // -- Coded set names carry their parsed identity through --
+            Check("elements carry the parsed discipline", json.Contains("\"discipline\":\"STRC\""));
+            Check("elements carry the parsed activity", json.Contains("\"activity\":\"FOUN\""));
+            Check("elements carry the parsed level", json.Contains("\"level\":\"L01\""));
+
+            // -- What must NOT be in there --
+            Check("a set with no matched task is left out", !json.Contains("Unscheduled Set"));
+            Check("a failed export does not emit a second element for its set",
+                CountOccurrences(json, "\"taskId\":\"" + foundations.StableKey + "\"") == 1);
+            Check("each task is emitted once", CountOccurrences(json, "\"durationDays\"") == 2);
+            Check("scheduleEnd is the latest planned finish",
+                json.Contains("\"scheduleEnd\":\"2026-03-20\""));
+            Check("task type is normalised to what TimeLiner understands",
+                json.Contains("\"type\":\"Demolish\""));
+
+            // Nothing matched means nothing to say - an empty tasks array would only
+            // be refused on the Unreal side, so no file is written at all.
+            Check("no sidecar when the 4D tab has matched nothing",
+                ScheduleJsonWriter.Build(new ExportOptions(), "TEST.nwf", results) == null);
         }
 
         private static NodeBuilder MakeTriangleNode(string name, string setName, ExportOptions options, MaterialResolver materials)
