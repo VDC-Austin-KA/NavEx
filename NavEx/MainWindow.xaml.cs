@@ -329,8 +329,8 @@ namespace NavEx
 
             if (summary.SchedulePath != null)
                 sb.AppendLine("  ✓ " + Path.GetFileName(summary.SchedulePath) + "  (4D schedule)");
-            else if (summary.ScheduleNote != null)
-                sb.AppendLine(summary.ScheduleNote);
+            else if (summary.Note != null)
+                sb.AppendLine(summary.Note);
 
             foreach (ExportResult result in summary.Results)
             {

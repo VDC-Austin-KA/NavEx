@@ -24,8 +24,8 @@ namespace NavEx.Core
         public TimeSpan Elapsed;
         /// <summary>The 4D schedule sidecar a Datasmith export wrote, or null.</summary>
         public string SchedulePath;
-        /// <summary>Why no sidecar was written, when one was expected. Null when there is nothing to say.</summary>
-        public string ScheduleNote;
+        /// <summary>Anything the export needs to tell the user that is not about one file. Null when there is nothing to say.</summary>
+        public string Note;
 
         public int SucceededCount
         {
@@ -104,6 +104,15 @@ namespace NavEx.Core
                 return summary;
             }
 
+            // Checked once, up front: without the native bridge every single set
+            // would fail identically, after paying for its geometry extraction first.
+            if (_options.Format == ExportFormat.Datasmith && !DatasmithNative.Available)
+            {
+                summary.Note = "Datasmith export is unavailable. " + DatasmithNative.UnavailableReason;
+                Log.Error(summary.Note);
+                return summary;
+            }
+
             try
             {
                 if (_options.Batch == BatchMode.SingleCombinedFile)
@@ -166,14 +175,14 @@ namespace NavEx.Core
                 // exporter. Say which of the two reasons it was, with the names, so the
                 // difference between "no schedule loaded" and "the schedule is loaded
                 // but names different sets" is visible without guessing.
-                summary.ScheduleNote = ExplainMissingSchedule(summary);
-                Log.Warning(summary.ScheduleNote);
+                summary.Note = ExplainMissingSchedule(summary);
+                Log.Warning(summary.Note);
             }
             catch (Exception ex)
             {
                 // The geometry is already on disk and still usable; losing the sidecar
                 // must not turn a finished export into a failed one.
-                summary.ScheduleNote = "Could not write " + ScheduleJsonWriter.FileName + ": " + ex.Message;
+                summary.Note = "Could not write " + ScheduleJsonWriter.FileName + ": " + ex.Message;
                 Log.Error("Could not write " + ScheduleJsonWriter.FileName, ex);
             }
         }
