@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using Autodesk.Navisworks.Api;
 using NavEx.Core.Exporters;
+using NavEx.FourD;
 
 namespace NavEx.Core
 {
@@ -22,6 +24,8 @@ namespace NavEx.Core
         public TimeSpan Elapsed;
         /// <summary>The 4D schedule sidecar a Datasmith export wrote, or null.</summary>
         public string SchedulePath;
+        /// <summary>Why no sidecar was written, when one was expected. Null when there is nothing to say.</summary>
+        public string ScheduleNote;
 
         public int SucceededCount
         {
@@ -152,18 +156,79 @@ namespace NavEx.Core
                     _options.OutputFolder);
 
                 if (summary.SchedulePath != null)
+                {
                     Log.Success("Schedule -> " + Path.GetFileName(summary.SchedulePath));
-                else
-                    Log.Info("None of the exported sets is matched to a schedule task, so no " +
-                             ScheduleJsonWriter.FileName + " was written. Import and match a " +
-                             "schedule on the 4D tab to date the model in Unreal.");
+                    return;
+                }
+
+                // Nothing written is the common outcome for anyone who has not been to
+                // the 4D tab, and a silently absent file looks exactly like a broken
+                // exporter. Say which of the two reasons it was, with the names, so the
+                // difference between "no schedule loaded" and "the schedule is loaded
+                // but names different sets" is visible without guessing.
+                summary.ScheduleNote = ExplainMissingSchedule(summary);
+                Log.Warning(summary.ScheduleNote);
             }
             catch (Exception ex)
             {
                 // The geometry is already on disk and still usable; losing the sidecar
                 // must not turn a finished export into a failed one.
+                summary.ScheduleNote = "Could not write " + ScheduleJsonWriter.FileName + ": " + ex.Message;
                 Log.Error("Could not write " + ScheduleJsonWriter.FileName, ex);
             }
+        }
+
+        /// <summary>
+        /// Why no schedule sidecar came out of a Datasmith export. The two causes need
+        /// different fixes, so they get different sentences.
+        /// </summary>
+        private string ExplainMissingSchedule(ExportSummary summary)
+        {
+            int links = _options.DatasmithTaskLinks == null ? 0 : _options.DatasmithTaskLinks.Count;
+
+            if (links == 0)
+            {
+                return "No " + ScheduleJsonWriter.FileName + " was written: no schedule task is "
+                     + "matched to any selection set. Go to the 4D tab, read TimeLiner or import a "
+                     + "schedule, check the matches, then export again.";
+            }
+
+            if (_options.Batch == BatchMode.SingleCombinedFile && summary.Results.Count == 1)
+            {
+                return "No " + ScheduleJsonWriter.FileName + " was written: a single combined file "
+                     + "is one scene with no per-set identity to hang tasks on. Switch Batch to "
+                     + "\"One file per set\" so each set can carry its own task.";
+            }
+
+            var exported = new List<string>();
+            foreach (ExportResult result in summary.Results)
+                if (result != null && !result.Failed && !string.IsNullOrEmpty(result.SetName))
+                    exported.Add(result.SetName);
+
+            var matched = new List<string>();
+            foreach (KeyValuePair<string, ScheduleTask> entry in _options.DatasmithTaskLinks)
+                matched.Add(entry.Key);
+
+            return string.Format(CultureInfo.InvariantCulture,
+                "No {0} was written: {1:N0} set(s) are matched to schedule tasks, but none of them is "
+                + "a set this export wrote. Exported: {2}. Matched on the 4D tab: {3}.",
+                ScheduleJsonWriter.FileName, links, Sample(exported), Sample(matched));
+        }
+
+        /// <summary>First few names, so a name mismatch is obvious without a full dump.</summary>
+        private static string Sample(List<string> names)
+        {
+            if (names.Count == 0) return "(none)";
+            var sb = new StringBuilder();
+            int shown = Math.Min(3, names.Count);
+            for (int i = 0; i < shown; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(names[i]);
+            }
+            if (names.Count > shown)
+                sb.Append(string.Format(CultureInfo.InvariantCulture, " (+{0:N0} more)", names.Count - shown));
+            return sb.ToString();
         }
 
         private ExportResult ExportScene(
