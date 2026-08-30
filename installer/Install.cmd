@@ -82,6 +82,17 @@ if errorlevel 1 (
     exit /b 0
 )
 
-echo   [  ok  ] Navisworks Manage %YEAR%
+REM Datasmith export needs two native DLLs beside NavEx.dll: the bridge and the
+REM Datasmith SDK it links against. They are optional -- every other export
+REM format works without them -- so a download that does not carry them still
+REM installs, and NavEx says which one is missing if Datasmith is chosen.
+set NATIVE=
+if exist "%SRC%\NavExDatasmith.dll" (
+    copy /y "%SRC%\NavExDatasmith.dll" "%DEST%\Plugins\NavEx\" >nul
+    if exist "%SRC%\DatasmithSDK.dll" copy /y "%SRC%\DatasmithSDK.dll" "%DEST%\Plugins\NavEx\" >nul
+    set NATIVE= + Datasmith
+)
+
+echo   [  ok  ] Navisworks Manage %YEAR%!NATIVE!
 set INSTALLED=1
 exit /b 0

@@ -17,6 +17,9 @@ The installer copies two files per Navisworks version into
 
     C:\Program Files\Autodesk\Navisworks Manage <year>\Plugins\NavEx\
 
+plus two more, NavExDatasmith.dll and DatasmithSDK.dll, when the download
+carries them (see DATASMITH below).
+
 That is all it does — mkdir and copy, nothing else.
 
 
@@ -32,6 +35,23 @@ For each Navisworks Manage year you have:
        V25  ->  Navisworks Manage 2025
        V26  ->  Navisworks Manage 2026
        V27  ->  Navisworks Manage 2027
+
+
+DATASMITH
+---------
+
+The Datasmith export format needs two extra native files next to NavEx.dll:
+
+    NavExDatasmith.dll    the bridge onto Epic's Datasmith Export SDK
+    DatasmithSDK.dll      the SDK itself
+
+Both are built from Unreal Engine source (the DatasmithSDK program target); see
+docs/datasmith-sdk-integration.md in the repository. Build them against the same
+engine version you will import into - Epic does not guarantee .udatasmith files
+are readable by a different version's importer.
+
+Without them every other format still works, and choosing Datasmith reports
+which file is missing rather than writing something that cannot be imported.
 
 
 UNINSTALL
