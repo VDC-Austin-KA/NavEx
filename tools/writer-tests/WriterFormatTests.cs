@@ -35,6 +35,7 @@ namespace NavEx
             FbxStructuralInvariants();
             DatasmithContractFields();
             ScheduleSidecarShape();
+            DatasmithEndToEnd();
 
             Console.WriteLine();
             Console.WriteLine(_failures == 0
@@ -254,6 +255,101 @@ namespace NavEx
             Check("a second node in the same scene gets a unique element name",
                 DatasmithWriter.ElementName(nodeB, 1) == "Miscellaneous_Set_1",
                 DatasmithWriter.ElementName(nodeB, 1));
+        }
+
+        /// <summary>
+        /// The real thing: a SceneData through DatasmithWriter, the native bridge and
+        /// Epic's SDK, producing a .udatasmith plus a .udsmesh payload on disk.
+        ///
+        /// Skipped unless NavExDatasmith.dll and DatasmithSDK.dll are sitting next to
+        /// the test binary, because they are built from Unreal Engine source and most
+        /// checkouts will not have them. When they are there, this is what proves the
+        /// P/Invoke marshalling and the SDK call sequence actually work -- everything
+        /// else in this file only inspects strings.
+        /// </summary>
+        private static void DatasmithEndToEnd()
+        {
+            if (!DatasmithNative.Available)
+            {
+                Console.WriteLine("  skip  Datasmith end-to-end (" + DatasmithNative.UnavailableReason + ")");
+                return;
+            }
+
+            var options = new ExportOptions { OutputFolder = ".", IncludeNormals = true, WeldVertices = false };
+            var materials = new MaterialResolver(options);
+            var scene = new SceneData
+            {
+                Name = "E2E",
+                Materials = materials.Materials,
+                SourceDocument = "site.nwd",
+                SourceUnits = "Feet",
+                TargetUnits = "Meters",
+                YUpApplied = true,
+                AppliedOffset = new Vec3(0, 0, 0)
+            };
+
+            const string setName = "02120_L01_STRC_FOUN";
+            NodeBuilder node = MakeTriangleNode("Foundations", setName, options, materials);
+            scene.Nodes.Add(node);
+
+            string dir = Path.Combine(Path.GetTempPath(), "navex_e2e");
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, setName + ".udatasmith");
+
+            ExportResult result;
+            try
+            {
+                result = new DatasmithWriter(options).Write(scene, path);
+            }
+            catch (Exception ex)
+            {
+                Check("Datasmith export through the SDK succeeds", false, ex.Message);
+                return;
+            }
+
+            Check("a .udatasmith was written", File.Exists(path));
+            Check("one actor was exported", result.NodeCount == 1,
+                result.NodeCount.ToString(CultureInfo.InvariantCulture));
+
+            // THE point of the whole bridge: Datasmith reads only its own binary mesh
+            // format, so the payload must be a .udsmesh in the _Assets folder.
+            string assets = Path.Combine(dir, setName + "_Assets");
+            Check("an _Assets payload folder was created", Directory.Exists(assets));
+            string[] payloads = Directory.Exists(assets) ? Directory.GetFiles(assets, "*.udsmesh") : new string[0];
+            Check("the mesh payload is a .udsmesh", payloads.Length == 1,
+                payloads.Length.ToString(CultureInfo.InvariantCulture));
+
+            if (payloads.Length == 1)
+            {
+                // The importer FArchive-deserialises an FDatasmithPackedMeshes out of
+                // this; the type name is the first thing in the stream.
+                byte[] head = new byte[64];
+                using (FileStream fs = File.OpenRead(payloads[0])) fs.Read(head, 0, head.Length);
+                Check("the payload really is an FDatasmithPackedMeshes archive",
+                    Encoding.ASCII.GetString(head).Contains("FDatasmithPackedMeshes"));
+            }
+
+            string xml = File.Exists(path) ? File.ReadAllText(path) : "";
+
+            // Format shape, against a genuine Epic-produced export. These are the
+            // things the old hand-written writer got wrong.
+            Check("the scene declares the Datasmith format version, not NavEx's",
+                xml.Contains("<Version>0.24</Version>"), FirstLineContaining(xml, "<Version>"));
+            Check("the payload is referenced by a lowercase <file path> element",
+                xml.Contains("<file path=\"" + setName + "_Assets/"),
+                FirstLineContaining(xml, "file path="));
+            Check("the mesh carries the <Hash> the importer expects", xml.Contains("<Hash value="));
+            Check("the mesh carries its <Size>", xml.Contains("<Size a="));
+            Check("geometry is placed with an <ActorMesh>", xml.Contains("<ActorMesh "));
+
+            // The linkage Unrealistic4D joins on has to survive the SDK round trip.
+            Check("pixmy.set.name survives into the exported scene",
+                xml.Contains("name=\"pixmy.set.name\" type=\"String\" val=\"" + setName + "\""),
+                FirstLineContaining(xml, "pixmy.set.name"));
+            Check("the navex provenance survives too", xml.Contains("name=\"navex:sourceDocument\""));
+
+            Directory.Delete(dir, true);
         }
 
         private static string Value(List<KeyValuePair<string, string>> meta, string key)

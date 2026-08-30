@@ -1,5 +1,10 @@
 // NavEx <-> Datasmith Export SDK bridge. See NavExDatasmith.h for the contract.
 
+// Before any Unreal header, deliberately. Epic's own SDK sample does the same in
+// its pch: once UE's Windows headers have been through strsafe.h's declarations,
+// including it afterwards produces a wall of C4141 "'inline' used more than once".
+#include <strsafe.h>
+
 #include "NavExDatasmith.h"
 
 #include "DatasmithExporterManager.h"
@@ -10,6 +15,7 @@
 #include "DatasmithMeshExporter.h"
 #include "IDatasmithSceneElements.h"
 
+#include "HAL/PlatformTLS.h"
 #include "Containers/Map.h"
 #include "Containers/UnrealString.h"
 #include "Templates/SharedPointer.h"
@@ -20,6 +26,12 @@ namespace
 	thread_local FString GLastError;
 
 	bool GInitialized = false;
+
+	/**
+	 * The thread that called Initialize. Unreal pins its main/game thread at static
+	 * init and asserts on it during teardown, so Shutdown is only safe from here.
+	 */
+	uint32 GInitThreadId = 0;
 
 	void SetError(const FString& Message)
 	{
@@ -63,7 +75,11 @@ int NavExDs_Initialize()
 	// SDK quiet and off the host's stdout. The exporter UI would need its own
 	// engine directory and a second thread; we do not use it.
 	Options.bSuppressLogs = true;
-	Options.bSaveLogToUserDir = false;
+	// True, deliberately. Left false the SDK writes its Engine/ log and crash
+	// folders relative to the working directory, which for an in-process plugin is
+	// wherever the host was launched from -- for Navisworks, its own install under
+	// Program Files, where writing needs administrator rights.
+	Options.bSaveLogToUserDir = true;
 	Options.bEnableMessaging = false;      // DirectLink is not used
 	Options.bUseDatasmithExporterUI = false;
 
@@ -74,6 +90,7 @@ int NavExDs_Initialize()
 	}
 
 	GInitialized = true;
+	GInitThreadId = FPlatformTLS::GetCurrentThreadId();
 	return 0;
 }
 
@@ -83,6 +100,23 @@ void NavExDs_Shutdown()
 	{
 		return;
 	}
+
+	// Shutdown tears down Unreal's object and linker systems, which assert they are
+	// running on the thread that initialised them. A host application gives no say
+	// in which thread unwinds it -- for NavEx it is the CLR's ProcessExit thread,
+	// never the Navisworks main thread that ran the export -- and calling anyway
+	// produces a handled ensure plus a full callstack on the way out of every
+	// session. Tagging the thread with FTaskTagScope does not help: the tag scope
+	// asserts on the same condition.
+	//
+	// So shut down only when we can do it correctly, and otherwise leave the SDK to
+	// the process teardown that is already happening. Skipping is the quiet path;
+	// the alternative is provoking an assert inside a host we do not own.
+	if (FPlatformTLS::GetCurrentThreadId() != GInitThreadId)
+	{
+		return;
+	}
+
 	FDatasmithExporterManager::Shutdown();
 	GInitialized = false;
 }

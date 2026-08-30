@@ -89,12 +89,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <!--
-        Must match how the SDK was built. UBT builds the SDK against the release
-        CRT even in Development, so both configurations use MultiThreaded here;
-        mixing CRTs across the DLL boundary is a crash, not a link error.
-      -->
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <!-- RuntimeLibrary is set in DatasmithSDK.props and must match the SDK;
+           deliberately not overridden per configuration. -->
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -102,7 +98,6 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -112,6 +107,7 @@
 
   <ItemGroup>
     <ClInclude Include="NavExDatasmith.h" />
+    <ClInclude Include="UEDefinitions.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NavExDatasmith.cpp" />

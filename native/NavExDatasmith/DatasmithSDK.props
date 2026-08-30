@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Where the built Datasmith SDK lives, and the compiler/linker settings Epic
-  requires to consume it. Same role as the DatasmithSDK.props that Epic's own
-  DatasmithSDKSample.vcxproj imports.
+  Where the built Datasmith SDK lives, and the compiler settings required to
+  consume it.
 
   Building the `DatasmithSDK` program target from UE source populates:
 
@@ -11,11 +10,20 @@
           Public\   DatasmithCore + DirectLink + DatasmithExporter headers
           Private\  Core, CoreUObject, TraceLog, Messaging, AutoRTFM headers
 
-  which is self-contained -- the include paths point there, not into the engine
+  which is self-contained: the include paths point there, not into the engine
   source tree. Override DatasmithSDKPath on the command line to build against a
   different SDK:
 
       msbuild ... /p:DatasmithSDKPath=D:\other\DatasmithSDK\
+
+  EVERY setting below is taken from the response file UBT itself used to build
+  the SDK (Intermediate\Build\Win64\x64\DatasmithSDK\Development\Core\
+  Core.Shared.rsp), not from Epic's "Setting Up your Project" page, which dates
+  from UE4 and is missing most of it. Unreal's headers are configuration
+  dependent (struct layout, alignment and inlining all change with these
+  macros and switches), so a consumer built with a different set describes a
+  different binary than the DLL it links against, and the failures are runtime
+  corruption rather than link errors.
 -->
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="UserMacros">
@@ -29,40 +37,42 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(DatasmithSDKPath)Public;$(DatasmithSDKPath)Private;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+
       <!--
-        Epic's required set (Datasmith SDK Guidelines, "Setting Up your Project").
-        The *_API=DLLIMPORT entries are what make the monolithic SDK DLL's symbols
-        resolve; drop one and you get thousands of unresolved externals.
+        UBT force-includes its generated Definitions.h; UEDefinitions.h is that
+        file with the *_API macros flipped to DLLIMPORT. See gen_defs.py.
       -->
+      <ForcedIncludeFiles>UEDefinitions.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+
+      <!-- The handful of defines UBT passes on the command line rather than in
+           the generated header. -->
       <PreprocessorDefinitions>
-        UE_BUILD_DEVELOPMENT=1;
-        UE_BUILD_MINIMAL=1;
-        WITH_EDITOR=0;
-        WITH_EDITORONLY_DATA=1;
-        WITH_SERVER_CODE=1;
-        WITH_ENGINE=0;
-        WITH_UNREAL_DEVELOPER_TOOLS=0;
-        WITH_PLUGIN_SUPPORT=0;
-        IS_MONOLITHIC=1;
-        IS_PROGRAM=1;
-        PLATFORM_WINDOWS=1;
-        CORE_API=DLLIMPORT;
-        COREUOBJECT_API=DLLIMPORT;
-        DATASMITHEXPORTER_API=DLLIMPORT;
-        DATASMITHCORE_API=DLLIMPORT;
-        DIRECTLINK_API=DLLIMPORT;
-        WIN32=1;
-        _WIN32_WINNT=0x0601;
-        WINVER=0x0601;
-        UNICODE;
-        _UNICODE;
-        UE_BUILD_DEVELOPMENT_WITH_DEBUGGAME=0;
-        UBT_COMPILED_PLATFORM=Windows;
+        _WINDLL;
+        _DISABLE_EXTENDED_ALIGNED_STORAGE;
+        _HAS_EXCEPTIONS=0;
+        PLATFORM_EXCEPTIONS_DISABLED=1;
+        SAL_NO_ATTRIBUTE_DECLARATIONS=1;
         %(PreprocessorDefinitions)
       </PreprocessorDefinitions>
-      <!-- Unreal requires C++20. -->
+
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <!-- /Zc:preprocessor. Unreal's macros need the conforming preprocessor;
+           the traditional one mis-expands them. -->
       <UseStandardPreprocessor>true</UseStandardPreprocessor>
+      <ExceptionHandling>false</ExceptionHandling>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <StructMemberAlignment>8Bytes</StructMemberAlignment>
+      <!-- Unreal headers generate very large object files. -->
+      <AdditionalOptions>/bigobj /Zc:inline /Zc:__cplusplus /Zc:strictStrings- %(AdditionalOptions)</AdditionalOptions>
+
+      <!--
+        /MD. The SDK is built against the DYNAMIC CRT (confirmed in UBT's own
+        response file) in every configuration. Epic's sample .vcxproj says
+        MultiThreaded, which is stale: mixing CRTs across this boundary is a
+        runtime crash, not a link error, so this must not be "fixed" to /MT.
+      -->
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(DatasmithSDKPath);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
